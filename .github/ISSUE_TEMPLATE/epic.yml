@@ -1,0 +1,38 @@
+name: Epic
+description: Coordinate a milestone-scale outcome and its child Issues.
+title: '[EPIC] '
+labels: ['type:epic', 'status:ready']
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: Describe the player or release outcome and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: Define the boundary of this Epic.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checklist
+      description: List observable milestone gates and child Issues as a Markdown checklist.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and contracts
+      description: Link blocking Issues, frozen specs, expected artifacts, and decision owners.
+  - type: textarea
+    id: status
+    attributes:
+      label: Status roll-up
+      description: Track Done, In progress, Blocked, Next, and Risks.
+    validations:
+      required: true

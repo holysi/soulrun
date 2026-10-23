@@ -6,7 +6,7 @@
 
 ## 環境需求
 
-- Node.js 22 LTS
+- Node.js `>=22.12.0 <23`（建議使用 `.nvmrc` 指定的版本）
 - npm 10 或更新版本
 - Playwright Chromium（只在執行瀏覽器測試時需要）
 

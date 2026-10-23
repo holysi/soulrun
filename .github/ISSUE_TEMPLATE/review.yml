@@ -1,0 +1,34 @@
+name: Review
+description: Request an independent code, spec, performance, or asset review.
+title: '[REVIEW] '
+labels: ['type:review', 'status:ready']
+body:
+  - type: input
+    id: pull-request
+    attributes:
+      label: Pull request
+      description: Link the PR and its owning Issue.
+      placeholder: https://github.com/holysi/soulrun/pull/000
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Review scope
+      description: Identify relevant specs, contracts, changed systems, and explicit non-goals.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and author evidence
+      description: Summarize known risks, commands run, seeds, browsers, viewports, and artifact paths.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Review acceptance
+      description: Confirm P0/P1 resolution, P2 disposition, unresolved threads, and final verdict.
+    validations:
+      required: true
