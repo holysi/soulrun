@@ -13,16 +13,33 @@ Adventure states are:
 ```text
 idle -> loading-stage -> playing -> boss-intro -> boss-fight
                         playing -> level-up -> playing
-boss-fight -> stage-summary -> upgrade-choice -> loading-stage
+boss-fight -> level-up -> boss-fight
+boss-fight -> boss-cleanup -> level-up -> boss-cleanup
+boss-cleanup -> stage-summary -> upgrade-choice -> loading-stage
 playing|boss-fight -> paused -> previous state
 playing|boss-fight -> adventure-ended -> idle
 ```
 
 Only player health reaching zero emits `adventure:ended`. A Boss defeat emits
-`boss:defeated`, clears all battlefield state, collects remaining XP gems,
-shows the summary, heals 30% maximum health, grants one upgrade choice, then
-loads the next stage. Completing `inferno` increments `completedLoops` before
-the next `stage:started`. Stage time does not advance during level-up, pause,
+`boss:defeated` and enters `boss-cleanup`. The ordered cleanup sequence is:
+
+1. Stop ordinary spawns and combat damage; award Boss score.
+2. Collect every remaining XP gem in ascending runtime entity ID, emitting the
+   normal collection/level events and queueing one level-up per crossed level.
+3. Clear enemies, projectiles, hazards, healing pickups, and other battlefield
+   state. XP gems have already been removed by collection, never by clearing.
+4. Resolve queued level-up offers one at a time in FIFO level order.
+5. Show the stage summary, then heal 30% maximum health.
+6. Present the one forced Boss upgrade, then load the next stage.
+
+During `playing` or `boss-fight`, reaching a level immediately enters
+`level-up`, pauses the simulation, resolves one queued offer, and repeats until
+the queue is empty before returning to the exact prior state. During
+`boss-cleanup`, levels are queued but no modal opens until collection and clear
+finish; the return state is `boss-cleanup`, never `boss-fight`. Boss upgrades
+do not consume or replace queued level upgrades. Completing `inferno`
+increments `completedLoops` after its Boss upgrade and before the next
+`stage:loading`. Stage time does not advance during level-up, pause, cleanup,
 summary, upgrade choice, or browser blur. Browser blur always requests pause.
 
 ## Event envelope
@@ -66,7 +83,7 @@ Event names and payload fields are frozen:
 | `upgrade:selected` | `offerId`, `optionId`, `newLevel` |
 | `weapon:fired` | `weaponId`, `attackId`, `origin`, `aim` |
 | `enemy:spawned` | `entityId`, `enemyId`, `elite`, `x`, `y` |
-| `enemy:defeated` | `entityId`, `enemyId`, `elite`, `scoreAwarded`, `xpAwarded` |
+| `enemy:defeated` | `entityId`, `enemyId`, `elite`, `scoreAwarded`, `xpGemValue` |
 | `score:changed` | `score`, `delta`, `sourceId` |
 | `game:pause-changed` | `paused`, `reason: 'user'|'blur'` |
 | `settings:changed` | `settings` (the complete v1 settings object) |

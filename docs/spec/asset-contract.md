@@ -4,7 +4,8 @@
 
 `assets/manifest.json` is UTF-8 JSON validated against
 `docs/spec/asset-manifest.schema.json`. Every entry has a unique lowercase
-kebab-case `key`, repository-relative `path`, `kind`, and `license: "original"`.
+kebab-case `key`, repository-relative `path`, discriminating `kind`, and
+`license: "original"`.
 Paths use forward slashes and lowercase kebab-case filenames. PNGs use sRGB,
 full alpha, no embedded scaling, and no smoothing. Runtime code refers only to
 manifest keys, never raw paths.
@@ -13,7 +14,7 @@ Required top-level fields are `schemaVersion: 1`, `palette`, `images`, `audio`,
 and `maps`. Palette entries name `id` and ordered `colors` (`#rrggbb`); fixed
 IDs are `ui`, `cemetery`, `dungeon`, and `inferno`.
 
-Map entries name `key`, `path`, `license`, `tilesetKey`, `width`, `height`,
+Map entries name `key`, `path`, `kind: 'map'`, `license`, `tilesetKey`, `width`, `height`,
 `tileWidth: 16`, `tileHeight: 16`, and `layers`. Each layer entry names `name`,
 `kind: 'tile'|'object'`, and `collision`; the required layer names are listed
 below. Map dimensions are tile counts and MUST resolve to the world dimensions

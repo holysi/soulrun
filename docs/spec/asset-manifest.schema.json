@@ -115,10 +115,11 @@
     "map": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "path", "license", "tilesetKey", "width", "height", "tileWidth", "tileHeight", "layers"],
+      "required": ["key", "path", "kind", "license", "tilesetKey", "width", "height", "tileWidth", "tileHeight", "layers"],
       "properties": {
         "key": { "$ref": "#/$defs/key" },
         "path": { "type": "string", "pattern": "^assets/[a-z0-9/.-]+\\.json$" },
+        "kind": { "const": "map" },
         "license": { "const": "original" },
         "tilesetKey": { "$ref": "#/$defs/key" },
         "width": { "type": "integer", "minimum": 1 },
