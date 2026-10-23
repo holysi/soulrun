@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository is currently a clean scaffold with no application code or build system. Keep the root focused on project-wide configuration and documentation. When implementation begins, use a predictable layout:
+This repository uses Vite, TypeScript, and Phaser 3. Keep the root focused on project-wide configuration and documentation, using this layout:
 
 - `src/` for production code, grouped by feature or domain.
 - `tests/` for automated tests that mirror the structure under `src/`.
@@ -13,12 +13,14 @@ Avoid committing generated output, dependency directories, editor settings, or s
 
 ## Build, Test, and Development Commands
 
-No build, test, or local-run commands are defined yet. When selecting a toolchain, expose a small, consistent command set and document it here and in `README.md`. For example:
+Use the npm scripts documented in `README.md`:
 
 ```text
 npm run dev      # Start the local development environment
 npm test         # Run the complete automated test suite
-npm run lint     # Check formatting and static-analysis rules
+npm run lint     # Run static analysis
+npm run typecheck # Check strict TypeScript types
+npm run test:e2e # Run the Chromium smoke suite
 npm run build    # Produce a release build
 ```
 
@@ -30,7 +32,7 @@ Follow the formatter and linter configured for the chosen language; do not hand-
 
 ## Testing Guidelines
 
-Add tests with every behavior change and regression fix. Name tests after observable behavior, for example `player_stops_at_wall` or `playerStopsAtWall`. Keep test fixtures deterministic and place reusable fixtures under `tests/fixtures/`. Once a framework is chosen, document its focused-test and coverage commands here.
+Add tests with every behavior change and regression fix. Name tests after observable behavior, for example `playerStopsAtWall`. Keep test fixtures deterministic and place reusable fixtures under `tests/fixtures/`. Unit tests use Vitest under `tests/unit/`; browser flows use Playwright under `tests/e2e/`.
 
 ## Commit & Pull Request Guidelines
 

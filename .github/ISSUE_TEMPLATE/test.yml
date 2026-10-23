@@ -1,0 +1,40 @@
+name: Test
+description: Define deterministic automated or manual verification work.
+title: '[TEST] '
+labels: ['type:test', 'area:qa', 'status:ready']
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Verification outcome
+      description: Describe the behavior or risk this test work proves.
+    validations:
+      required: true
+  - type: textarea
+    id: coverage
+    attributes:
+      label: Coverage and non-goals
+      description: List scenarios, browsers, viewports, and excluded cases.
+    validations:
+      required: true
+  - type: textarea
+    id: fixtures
+    attributes:
+      label: Deterministic setup
+      description: Record seeds, fixtures, test API version, reset steps, and dependencies.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use a checklist of expected results and required evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Commands and evidence
+      description: List exact commands and expected screenshot, trace, or report paths.
+    validations:
+      required: true

@@ -1,0 +1,40 @@
+name: Asset
+description: Specify an original visual or audio asset delivery.
+title: '[ASSET] '
+labels: ['type:asset', 'status:ready']
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: Identify the player-facing result and required manifest keys.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Asset contract
+      description: State paths, dimensions, frame order, anchor, collision, palette, format, and license requirements.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: List included assets and exclusions.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Include manifest validation, contact sheets or audio previews, and original-license attestation.
+    validations:
+      required: true
+  - type: textarea
+    id: handoff
+    attributes:
+      label: Dependencies and handoff evidence
+      description: Link blocking Issues and list preview, source, output, and verification paths.
+    validations:
+      required: true
