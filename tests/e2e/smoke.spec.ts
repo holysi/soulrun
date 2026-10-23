@@ -9,4 +9,29 @@ test('loads a 480x270 nearest-neighbor Phaser canvas', async ({ page }) => {
   await expect(canvas).toHaveAttribute('width', '480');
   await expect(canvas).toHaveAttribute('height', '270');
   await expect(canvas).toHaveCSS('image-rendering', 'pixelated');
+  await expect(page.locator('[data-testid="game-root"]')).not.toHaveAttribute('data-test-state');
+});
+
+test('exposes a deterministic start, pause, and restart hook only in test mode', async ({
+  page,
+}) => {
+  await page.goto('/?test=1&seed=smoke-seed-001');
+
+  await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
+    await api.ready();
+    await api.startAdventure({ seed: 'smoke-seed-001' });
+  });
+
+  const root = page.locator('[data-testid="game-root"]');
+  await expect(root).toHaveAttribute('data-test-state', 'playing');
+  await page.evaluate(() => window.__SOULRUN_TEST__?.input('pause', true));
+  await expect(root).toHaveAttribute('data-test-state', 'paused');
+  await page.evaluate(() => window.__SOULRUN_TEST__?.reset({ clearStorage: true }));
+  await expect(root).toHaveAttribute('data-test-state', 'idle');
+
+  const snapshot = await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot());
+  expect(snapshot).toMatchObject({ state: 'idle', seed: 'smoke-seed-001', eventSequence: 0 });
 });

@@ -1,0 +1,42 @@
+// @vitest-environment jsdom
+
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { FoundationTestRuntime } from '../../src/game/testing/FoundationTestRuntime';
+import { TEST_SEEDS } from '../fixtures/seeds';
+
+describe('foundation test runtime', () => {
+  let mount: HTMLElement;
+  let runtime: FoundationTestRuntime;
+
+  beforeEach(() => {
+    mount = document.createElement('main');
+    runtime = new FoundationTestRuntime(mount, TEST_SEEDS.smoke, Promise.resolve());
+  });
+
+  it('starts, pauses, resumes, advances, and resets deterministically', async () => {
+    await runtime.startAdventure({ seed: TEST_SEEDS.smoke });
+    await runtime.advance(1000);
+    expect(runtime.snapshot().simulationTimeMs).toBeCloseTo(1000, 8);
+    runtime.input('pause', true);
+    await runtime.advance(500);
+    expect(runtime.snapshot().simulationTimeMs).toBeCloseTo(1000, 8);
+    runtime.input('pause', true);
+    await runtime.advance(500);
+    expect(runtime.snapshot().simulationTimeMs).toBeCloseTo(1500, 8);
+    await runtime.reset();
+    expect(runtime.snapshot()).toMatchObject({ state: 'idle', seed: TEST_SEEDS.smoke });
+  });
+
+  it('reports aim, boss, damage, and end state as plain snapshots', async () => {
+    await runtime.startAdventure({ seed: TEST_SEEDS.boss });
+    runtime.aimAt(0, -10);
+    await runtime.forceBoss();
+    runtime.damagePlayer(100);
+    const snapshot = runtime.snapshot();
+    expect(snapshot.player.aimDirection).toBe('n');
+    expect(snapshot.boss).toEqual({ id: 'graveyard-guardian', health: 1000, phase: 1 });
+    expect(snapshot).toMatchObject({ state: 'adventure-ended', eventSequence: 4 });
+    expect(() => structuredClone(snapshot)).not.toThrow();
+  });
+});
