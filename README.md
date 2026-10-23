@@ -31,13 +31,16 @@ npm run typecheck    # 執行嚴格 TypeScript 型別檢查
 npm test             # 執行 Vitest 單元測試
 npm run test:e2e     # 以 Chromium 執行 Playwright smoke test
 npm run test:e2e:firefox # 以 Firefox 執行同一組 smoke test
+npm run art:build    # 從原創 ImageGen 母稿重建像素素材與預覽
+npm run art:validate # 驗證素材 schema、尺寸、動畫、色盤與透明度
 npm run build        # 型別檢查並產生 dist/ 正式建置
+npm run build:test   # 產生含 deterministic test API 的 dist-test/ 測試建置
 npm run preview      # 在本機預覽正式建置
 ```
 
 遊戲使用 `480×270` 邏輯解析度、16:9 等比例縮放和 nearest-neighbor 像素呈現。開發時以最新版 Chrome、Edge 或 Firefox 手動驗證；自動 smoke test 使用 `960×540` Chromium viewport。
 
-開發伺服器可用 `?test=1&seed=smoke-seed-001` 啟用版本化的
+開發伺服器或 test-mode 建置可用 `?test=1&seed=smoke-seed-001` 啟用版本化的
 `window.__SOULRUN_TEST__` deterministic test API。正式建置會完全移除該 API；固定測試種子定義在 `tests/fixtures/seeds.ts`。
 
 ## 目錄

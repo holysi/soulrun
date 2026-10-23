@@ -150,9 +150,13 @@ export class FoundationTestRuntime implements SoulrunTestApi {
 
   async reset(options?: { clearStorage?: boolean }): Promise<void> {
     if (options?.clearStorage) {
-      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-        const key = localStorage.key(index);
-        if (key?.startsWith(STORAGE_PREFIX)) localStorage.removeItem(key);
+      try {
+        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+          const key = localStorage.key(index);
+          if (key?.startsWith(STORAGE_PREFIX)) localStorage.removeItem(key);
+        }
+      } catch {
+        // Storage cleanup is best-effort; denied storage must not break test isolation.
       }
     }
     const seed = this.random.seed;

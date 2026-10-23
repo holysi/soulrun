@@ -4,7 +4,9 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'playwright-report/**', 'test-results/**'] },
+  {
+    ignores: ['dist/**', 'dist-test/**', 'coverage/**', 'playwright-report/**', 'test-results/**'],
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -14,6 +16,15 @@ export default tseslint.config(
     },
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
+    },
+  },
+  {
+    files: ['tools/**/*.cjs'],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
   prettier,

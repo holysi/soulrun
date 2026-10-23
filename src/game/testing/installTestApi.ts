@@ -15,7 +15,8 @@ function canvasReady(): Promise<void> {
 
 export function installTestApi(mount: HTMLElement): void {
   const parameters = new URLSearchParams(window.location.search);
-  if (!import.meta.env.DEV || parameters.get('test') !== '1') return;
+  const exposesTestApi = import.meta.env.MODE === 'development' || import.meta.env.MODE === 'test';
+  if (!exposesTestApi || parameters.get('test') !== '1') return;
 
   const seed = parameters.get('seed') || 'smoke-seed-001';
   window.__SOULRUN_TEST__ = new FoundationTestRuntime(mount, seed, canvasReady());
