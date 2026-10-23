@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/holysi/soulrun/docs/spec/asset-manifest.schema.json",
+  "title": "Soulrun asset manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "palette", "images", "audio", "maps"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "palette": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "colors"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+          "colors": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^#[0-9a-f]{6}$" } }
+        }
+      }
+    },
+    "images": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/image" }
+    },
+    "audio": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/audio" }
+    },
+    "maps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/map" }
+    }
+  },
+  "$defs": {
+    "key": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "path", "license"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "path": { "type": "string", "pattern": "^assets/[a-z0-9/.-]+$" },
+        "license": { "const": "original" }
+      }
+    },
+    "animation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "frames", "frameRate", "repeat"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "frames": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 } },
+        "frameRate": { "type": "number", "exclusiveMinimum": 0 },
+        "repeat": { "enum": [-1, 0] },
+        "direction": { "enum": ["e", "se", "s", "sw", "w", "nw", "n", "ne"] }
+      }
+    },
+    "collision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "offsetX", "offsetY"],
+      "properties": {
+        "shape": { "enum": ["circle", "rect"] },
+        "offsetX": { "type": "number" },
+        "offsetY": { "type": "number" },
+        "radius": { "type": "number", "exclusiveMinimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "allOf": [
+        { "if": { "properties": { "shape": { "const": "circle" } } }, "then": { "required": ["radius"] } },
+        { "if": { "properties": { "shape": { "const": "rect" } } }, "then": { "required": ["width", "height"] } }
+      ]
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "path", "kind", "license", "width", "height", "frameWidth", "frameHeight", "anchor", "paletteId"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "path": { "type": "string", "pattern": "^assets/[a-z0-9/.-]+\\.png$" },
+        "kind": { "enum": ["sprite", "tileset", "vfx", "ui"] },
+        "license": { "const": "original" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "frameWidth": { "type": "integer", "minimum": 1 },
+        "frameHeight": { "type": "integer", "minimum": 1 },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } }
+        },
+        "paletteId": { "$ref": "#/$defs/key" },
+        "animations": { "type": "array", "items": { "$ref": "#/$defs/animation" } },
+        "collision": { "$ref": "#/$defs/collision" }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "path", "kind", "license", "format", "loop", "defaultVolume"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "path": { "type": "string", "pattern": "^assets/[a-z0-9/.-]+\\.(ogg|mp3)$" },
+        "kind": { "enum": ["music", "sfx"] },
+        "license": { "const": "original" },
+        "format": { "enum": ["ogg", "mp3"] },
+        "loop": { "type": "boolean" },
+        "defaultVolume": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxVoices": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "map": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "path", "kind", "license", "tilesetKey", "width", "height", "tileWidth", "tileHeight", "layers"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "path": { "type": "string", "pattern": "^assets/[a-z0-9/.-]+\\.json$" },
+        "kind": { "const": "map" },
+        "license": { "const": "original" },
+        "tilesetKey": { "$ref": "#/$defs/key" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "tileWidth": { "const": 16 },
+        "tileHeight": { "const": 16 },
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "kind", "collision"],
+            "properties": {
+              "name": { "enum": ["ground", "obstacles", "hazards", "decorations", "spawns"] },
+              "kind": { "enum": ["tile", "object"] },
+              "collision": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
