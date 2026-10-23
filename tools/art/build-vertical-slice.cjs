@@ -1,6 +1,7 @@
 // Deterministic post-processing for Issue #4. Requires repository dependencies.
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const prettier = require('prettier');
 const sharp = require('sharp');
 
 const root = path.resolve(__dirname, '../..');
@@ -520,10 +521,12 @@ async function writeManifest() {
     audio: [],
     maps: [],
   };
-  await fs.writeFile(
-    path.join(root, 'assets/manifest.json'),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  );
+  const manifestPath = path.join(root, 'assets/manifest.json');
+  const formattedManifest = await prettier.format(JSON.stringify(manifest), {
+    ...(await prettier.resolveConfig(manifestPath)),
+    parser: 'json',
+  });
+  await fs.writeFile(manifestPath, formattedManifest);
   return manifest;
 }
 
