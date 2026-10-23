@@ -37,6 +37,9 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      - name: Validate art assets
+        run: npm run art:validate
+
       - name: Build production bundle
         run: npm run build
 

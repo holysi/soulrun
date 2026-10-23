@@ -30,6 +30,8 @@ npm run lint         # 執行 ESLint 靜態檢查
 npm run typecheck    # 執行嚴格 TypeScript 型別檢查
 npm test             # 執行 Vitest 單元測試
 npm run test:e2e     # 以 Chromium 執行 Playwright smoke test
+npm run art:build    # 從原創 ImageGen 母稿重建像素素材與預覽
+npm run art:validate # 驗證素材 schema、尺寸、動畫、色盤與透明度
 npm run build        # 型別檢查並產生 dist/ 正式建置
 npm run preview      # 在本機預覽正式建置
 ```

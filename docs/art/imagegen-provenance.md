@@ -48,11 +48,12 @@ Avoid: painterly rendering, gradients, soft edges, realism, and recognizable cop
 8. Removes PNG physical-density metadata, then writes runtime PNGs,
    `assets/manifest.json`, and labeled contact sheets.
 
-Run with Sharp available on `NODE_PATH`:
+Install repository dependencies, then run the committed scripts:
 
 ```powershell
-node tools/art/build-vertical-slice.cjs
-node tools/art/validate-assets.cjs
+npm ci
+npm run art:build
+npm run art:validate
 ```
 
 Generated source boards are retained for auditability. Runtime assets are
