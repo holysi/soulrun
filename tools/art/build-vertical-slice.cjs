@@ -62,24 +62,95 @@ async function isolatedCrop(file, region, width, height, palette, margin = 2) {
       .composite([{ input: pixel, left: margin, top: margin }]).png().toBuffer());
 }
 
-async function shifted(input, width, height, dx, dy, tint) {
-  let layer = sharp(input);
-  if (tint) layer = layer.tint(tint);
-  const buffer = await layer.png().toBuffer();
-  return sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-    .composite([{ input: buffer, left: Math.max(0, dx), top: Math.max(0, dy) }]).png().toBuffer();
+const directionVectors = [
+  { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: -1, y: 1 },
+  { x: -1, y: 0 }, { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
+];
+
+function copyPixel(source, target, sourceIndex, x, y, width, height) {
+  if (x < 0 || y < 0 || x >= width || y >= height || source[sourceIndex + 3] === 0) return;
+  const targetIndex = (y * width + x) * 4;
+  for (let channel = 0; channel < 4; channel += 1) target[targetIndex + channel] = source[sourceIndex + channel];
+}
+
+async function transformFrame(input, width, height, mapPixel, tint) {
+  const sourcePng = tint ? await sharp(input).tint(tint).png().toBuffer() : input;
+  const { data } = await sharp(sourcePng).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const output = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const sourceIndex = (y * width + x) * 4;
+    const destination = mapPixel(x, y);
+    copyPixel(data, output, sourceIndex, destination.x, destination.y, width, height);
+  }
+  return sharp(output, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+async function walkFrame(input, width, height, phase) {
+  const bob = Math.abs(phase) === 1 ? -1 : 0;
+  const split = Math.floor(height * 0.48);
+  return transformFrame(input, width, height, (x, y) => {
+    const lowerRatio = Math.max(0, (y - split) / Math.max(1, height - split - 1));
+    const stride = Math.round(phase * lowerRatio);
+    const cloakSway = y > split && ((x + y + Math.abs(phase)) % 3 === 0) ? Math.sign(phase) : 0;
+    return { x: x + stride + cloakSway, y: y + bob };
+  });
+}
+
+async function hurtFrame(input, width, height, direction) {
+  return transformFrame(input, width, height, (x, y) => ({ x: x - direction.x, y: y - direction.y }), '#d7d0b4');
+}
+
+async function attackFrame(input, width, height, direction, reach, palette) {
+  const leaned = await transformFrame(input, width, height, (x, y) => ({
+    x: x + Math.round(direction.x * (y / height) * 2),
+    y: y + Math.round(direction.y * (y / height) * 2),
+  }));
+  const { data } = await sharp(leaned).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const cyan = hexRgb(palette[palette.length - 2]);
+  const bright = hexRgb(palette[palette.length - 1]);
+  const center = { x: Math.round(width / 2), y: Math.round(height * 0.45) };
+  const perpendicular = { x: -direction.y, y: direction.x };
+  for (let step = 4; step <= reach; step += 1) {
+    const px = Math.round(center.x + direction.x * step);
+    const py = Math.round(center.y + direction.y * step);
+    for (let thickness = -1; thickness <= 1; thickness += 1) {
+      const x = px + perpendicular.x * thickness;
+      const y = py + perpendicular.y * thickness;
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const index = (y * width + x) * 4;
+      const color = thickness === 0 ? bright : cyan;
+      data[index] = color[0]; data[index + 1] = color[1]; data[index + 2] = color[2]; data[index + 3] = 255;
+    }
+  }
+  return sharp(data, { raw: { width, height, channels: 4 } }).png().toBuffer();
+}
+
+async function deathFrame(input, width, height) {
+  const { data } = await sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const output = Buffer.alloc(width * height * 4);
+  const center = (width - 1) / 2;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    const sourceIndex = (y * width + x) * 4;
+    if (data[sourceIndex + 3] === 0 || (x + y) % 4 === 0) continue;
+    const collapsedX = Math.round(center + (x - center) * 1.18);
+    const collapsedY = Math.round(height * 0.61 + y * 0.34);
+    copyPixel(data, output, sourceIndex, collapsedX, collapsedY, width, height);
+  }
+  return sharp(output, { raw: { width, height, channels: 4 } }).png().toBuffer();
 }
 
 async function sheetFromPoses(poses, frameWidth, frameHeight, columns, palette) {
   const layers = [];
   for (let row = 0; row < poses.length; row += 1) {
     const base = poses[row];
+    const direction = directionVectors[row];
     for (let col = 0; col < columns; col += 1) {
-      const motions = columns === 9
-        ? [[0, 0], [0, 0], [0, -1], [1, 0], [0, -1], [0, 0], [1, 0], [2, -1], [0, 3]]
-        : [[0, 0], [0, 0], [0, -1], [1, 0], [0, -1], [0, 0]];
-      const tint = col === columns - 1 && columns === 6 ? '#d7d0b4' : (col === 5 && columns === 9 ? '#d7d0b4' : undefined);
-      const frame = await shifted(base, frameWidth, frameHeight, motions[col][0], motions[col][1], tint);
+      let frame = base;
+      if (col >= 1 && col <= 4) frame = await walkFrame(base, frameWidth, frameHeight, [-2, -1, 1, 2][col - 1]);
+      else if (col === 5) frame = await hurtFrame(base, frameWidth, frameHeight, direction);
+      else if (columns === 9 && col === 6) frame = await attackFrame(base, frameWidth, frameHeight, direction, Math.round(frameWidth * 0.27), palette);
+      else if (columns === 9 && col === 7) frame = await attackFrame(base, frameWidth, frameHeight, direction, Math.round(frameWidth * 0.40), palette);
+      else if (columns === 9 && col === 8) frame = await deathFrame(base, frameWidth, frameHeight);
       layers.push({ input: frame, left: col * frameWidth, top: row * frameHeight });
     }
   }
@@ -105,7 +176,21 @@ async function extractGrid(file, cols, rows, frameWidth, frameHeight, palette) {
 
 async function save(file, buffer) {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, buffer);
+  await fs.writeFile(file, path.extname(file) === '.png' ? stripPngChunks(buffer, new Set(['pHYs'])) : buffer);
+}
+
+function stripPngChunks(buffer, forbidden) {
+  const signature = buffer.subarray(0, 8);
+  const chunks = [signature];
+  let offset = 8;
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    const end = offset + 12 + length;
+    if (!forbidden.has(type)) chunks.push(buffer.subarray(offset, end));
+    offset = end;
+  }
+  return Buffer.concat(chunks);
 }
 
 async function extractEffect(region, width, height, palette = palettes.ui) {
@@ -121,15 +206,16 @@ function checkerSvg(width, height, cell = 8) {
   return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${tiles.join('')}</svg>`);
 }
 
-async function contactSheet(key, assetPath, frameWidth, frameHeight, collision, detail = '') {
+async function contactSheet(assetEntry, assetPath, detail = '') {
+  const { key, frameWidth, frameHeight, anchor, collision } = assetEntry;
   const asset = await fs.readFile(assetPath);
   const metadata = await sharp(asset).metadata();
   const one = await sharp(asset).extract({ left: 0, top: 0, width: frameWidth, height: frameHeight }).png().toBuffer();
   const four = await sharp(one).resize(frameWidth * 4, frameHeight * 4, { kernel: sharp.kernel.nearest }).png().toBuffer();
   const canvasW = 920; const canvasH = Math.max(360, 102 + metadata.height);
   const x1 = 24; const y1 = 72; const x4 = 460; const y4 = 90;
-  const anchorX = x4 + frameWidth * 4 * 0.5;
-  const anchorY = y4 + frameHeight * 4 * 0.82;
+  const anchorX = x4 + frameWidth * 4 * anchor.x;
+  const anchorY = y4 + frameHeight * 4 * anchor.y;
   const radius = (collision?.radius || 0) * 4;
   const notesY = y4 + frameHeight * 4 + 35;
   const cols = metadata.width / frameWidth; const rows = metadata.height / frameHeight;
@@ -142,7 +228,7 @@ async function contactSheet(key, assetPath, frameWidth, frameHeight, collision, 
     ${grid.join('')}
     <rect x="${x4}" y="${y4}" width="${frameWidth * 4}" height="${frameHeight * 4}" fill="none" stroke="#7456a6"/>
     ${collision ? `<circle cx="${anchorX + collision.offsetX * 4}" cy="${anchorY + collision.offsetY * 4}" r="${radius}" fill="none" stroke="#ff9a8f" stroke-width="2"/><path d="M${anchorX - 5} ${anchorY}h10M${anchorX} ${anchorY - 5}v10" stroke="#50e3e6" stroke-width="2"/>` : ''}
-    <text x="650" y="105" class="small">frame ${frameWidth}x${frameHeight}</text><text x="650" y="128" class="small">anchor 0.50,0.82</text>
+    <text x="650" y="105" class="small">frame ${frameWidth}x${frameHeight}</text><text x="650" y="128" class="small">anchor ${anchor.x.toFixed(2)},${anchor.y.toFixed(2)}</text>
     <text x="650" y="151" class="small">${detail}</text><text x="650" y="174" class="small">alpha: transparent RGBA</text><text x="650" y="197" class="small">license: original</text>
     <text x="460" y="${notesY}" class="small">${key === 'player-soul-guide' ? 'columns idle-0, walk-0..3, hurt-0,' : 'columns idle-0, walk-0..3, hurt-0'}</text>
     ${key === 'player-soul-guide' ? `<text x="460" y="${notesY + 21}" class="small">attack-0, attack-1, death-0</text>` : ''}
@@ -180,7 +266,7 @@ function directionalAnimations(columns, includeAttackDeath) {
     ];
     if (includeAttackDeath) animations.push(
       { key: `attack-${direction}`, frames: [start + 6, start + 7], frameRate: 10, repeat: 0, direction },
-      { key: `death-${direction}`, frames: [start + 8], frameRate: 1, repeat: 0, direction },
+      { key: `death-${direction}`, frames: [start + 5, start + 8], frameRate: 6, repeat: 0, direction },
     );
     return animations;
   });
@@ -219,6 +305,7 @@ async function writeManifest() {
     maps: [],
   };
   await fs.writeFile(path.join(root, 'assets/manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifest;
 }
 
 async function main() {
@@ -289,12 +376,13 @@ async function main() {
     { key: 'ui-heart', path: path.join(imageDir, 'ui-heart.png'), fw: 16, fh: 16, note: 'HUD icon' },
     { key: 'ui-pointer', path: path.join(imageDir, 'ui-pointer.png'), fw: 16, fh: 16, note: 'UI pointer' },
   ];
-  await save(path.join(previewDir, 'player-soul-guide-contact-sheet.png'), await contactSheet('player-soul-guide', contactItems[0].path, 32, 32, { radius: 8, offsetX: 0, offsetY: -5 }, 'rows e,se,s,sw,w,nw,n,ne'));
-  await save(path.join(previewDir, 'enemy-zombie-contact-sheet.png'), await contactSheet('enemy-zombie', contactItems[1].path, 32, 32, { radius: 7, offsetX: 0, offsetY: -4 }, 'idle/walk/hurt columns'));
-  await save(path.join(previewDir, 'enemy-bat-contact-sheet.png'), await contactSheet('enemy-bat', contactItems[2].path, 32, 32, { radius: 7, offsetX: 0, offsetY: -6 }, 'idle/walk/hurt columns'));
-  await save(path.join(previewDir, 'boss-graveyard-guardian-contact-sheet.png'), await contactSheet('boss-graveyard-guardian', contactItems[3].path, 48, 48, { radius: 17, offsetX: 0, offsetY: -8 }, 'idle/walk/hurt columns'));
+  const manifest = await writeManifest();
+  const manifestByKey = new Map(manifest.images.map((asset) => [asset.key, asset]));
+  await save(path.join(previewDir, 'player-soul-guide-contact-sheet.png'), await contactSheet(manifestByKey.get('player-soul-guide'), contactItems[0].path, 'rows e,se,s,sw,w,nw,n,ne'));
+  await save(path.join(previewDir, 'enemy-zombie-contact-sheet.png'), await contactSheet(manifestByKey.get('enemy-zombie'), contactItems[1].path, 'idle/walk/hurt columns'));
+  await save(path.join(previewDir, 'enemy-bat-contact-sheet.png'), await contactSheet(manifestByKey.get('enemy-bat'), contactItems[2].path, 'idle/walk/hurt columns'));
+  await save(path.join(previewDir, 'boss-graveyard-guardian-contact-sheet.png'), await contactSheet(manifestByKey.get('boss-graveyard-guardian'), contactItems[3].path, 'idle/walk/hurt columns'));
   await save(path.join(previewDir, 'cemetery-vertical-slice-contact-sheet.png'), await montage(contactItems));
-  await writeManifest();
   console.log(`Generated ${contactItems.length} contract assets and 5 contact sheets.`);
 }
 

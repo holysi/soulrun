@@ -117,9 +117,10 @@
         {
           "key": "death-e",
           "frames": [
+            5,
             8
           ],
-          "frameRate": 1,
+          "frameRate": 6,
           "repeat": 0,
           "direction": "e"
         },
@@ -166,9 +167,10 @@
         {
           "key": "death-se",
           "frames": [
+            14,
             17
           ],
-          "frameRate": 1,
+          "frameRate": 6,
           "repeat": 0,
           "direction": "se"
         },
@@ -215,9 +217,10 @@
         {
           "key": "death-s",
           "frames": [
+            23,
             26
           ],
-          "frameRate": 1,
+          "frameRate": 6,
           "repeat": 0,
           "direction": "s"
         },
@@ -264,9 +267,10 @@
         {
           "key": "death-sw",
           "frames": [
+            32,
             35
           ],
-          "frameRate": 1,
+          "frameRate": 6,
           "repeat": 0,
           "direction": "sw"
         },
@@ -313,9 +317,10 @@
         {
           "key": "death-w",
           "frames": [
+            41,
             44
           ],
-          "frameRate": 1,
+          "frameRate": 6,
           "repeat": 0,
           "direction": "w"
         },
@@ -362,9 +367,10 @@
         {
           "key": "death-nw",
           "frames": [
+            50,
             53
           ],
-          "frameRate": 1,
+          "frameRate": 6,
           "repeat": 0,
           "direction": "nw"
         },
@@ -411,9 +417,10 @@
         {
           "key": "death-n",
           "frames": [
+            59,
             62
           ],
-          "frameRate": 1,
+          "frameRate": 6,
           "repeat": 0,
           "direction": "n"
         },
@@ -460,9 +467,10 @@
         {
           "key": "death-ne",
           "frames": [
+            68,
             71
           ],
-          "frameRate": 1,
+          "frameRate": 6,
           "repeat": 0,
           "direction": "ne"
         }

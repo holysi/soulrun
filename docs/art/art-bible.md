@@ -37,7 +37,10 @@ manifest and regenerating every affected asset.
 - Player columns are `idle-0`, `walk-0..3`, `hurt-0`, `attack-0..1`, `death-0`.
 - Cemetery enemy/Boss columns are `idle-0`, `walk-0..3`, `hurt-0`; later
   attack/death sheets keep the same direction rows.
-- Walk loops play at 8 fps; player attacks at 10 fps; hit VFX at 14 fps.
+- Walk loops play at 8 fps and alternate lower-body/wing stride plus body bob.
+  Player attacks play at 10 fps with a forward lean and extending soul flare.
+  Death plays hurt into a compressed, partially faded collapse at 6 fps. Hit
+  VFX plays at 14 fps.
 
 Feet share a baseline. Anchors are normalized per frame and collision excludes
 glow, cloak trails, wings, chains, and shadows. Contact sheets show the full
@@ -47,7 +50,7 @@ coral outlines mark collision.
 ## Export and Naming
 
 Runtime images are sRGB RGBA PNGs with binary alpha and lowercase kebab-case
-filenames in `assets/images/`. No runtime image embeds scaling metadata.
+filenames in `assets/images/`. No runtime image embeds `pHYs` scaling metadata.
 Code loads manifest keys, never paths. Original ImageGen boards live in
 `assets/source/imagegen/`; they are references, not runtime textures.
 
