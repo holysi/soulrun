@@ -15,10 +15,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --project=chromium",
+    "test:e2e:firefox": "playwright test --project=firefox",
     "art:build": "node tools/art/build-vertical-slice.cjs",
     "art:validate": "node tools/art/validate-assets.cjs",
     "build": "tsc --noEmit && vite build",
+    "build:test": "tsc --noEmit && vite build --mode test --outDir dist-test",
+    "test:build-modes": "node tools/test/validate-build-modes.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -28,6 +31,7 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.56.1",
     "@types/node": "^22.0.0",
+    "jsdom": "^27.0.0",
     "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.13.0",

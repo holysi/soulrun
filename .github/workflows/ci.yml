@@ -43,6 +43,12 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+      - name: Build deterministic test bundle
+        run: npm run build:test
+
+      - name: Validate build-mode test API boundaries
+        run: npm run test:build-modes
+
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
