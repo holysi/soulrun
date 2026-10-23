@@ -3,9 +3,9 @@
 ## Manifest
 
 `assets/manifest.json` is UTF-8 JSON validated against
-`docs/spec/asset-manifest.schema.json`. Every entry has a unique lowercase
-kebab-case `key`, repository-relative `path`, discriminating `kind`, and
-`license: "original"`.
+`docs/spec/asset-manifest.schema.json`. Every image, audio, and map asset entry
+has a unique lowercase kebab-case `key`, repository-relative `path`,
+discriminating `kind`, and `license: "original"`.
 Paths use forward slashes and lowercase kebab-case filenames. PNGs use sRGB,
 full alpha, no embedded scaling, and no smoothing. Runtime code refers only to
 manifest keys, never raw paths.
