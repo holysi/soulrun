@@ -1,22 +1,11 @@
 import { Mulberry32Random } from '../random/RandomSource';
-import type {
-  AimDirection,
-  SoulrunTestApi,
-  TestInputCommand,
-  TestSnapshot,
-  TestRuntimeState,
-} from './types';
+import { PLAYER_CONFIG, WORLD_HEIGHT, WORLD_WIDTH } from '../constants';
+import { PlayerModel } from '../player/PlayerModel';
+import { aimDirectionForVector, normalizeMovement } from '../player/direction';
+import type { SoulrunTestApi, TestInputCommand, TestSnapshot, TestRuntimeState } from './types';
 
 const FIXED_STEP_MS = 1000 / 60;
 const STORAGE_PREFIX = 'soulrun:';
-
-function directionForVector(x: number, y: number): AimDirection {
-  if (x === 0 && y === 0) return 'e';
-  const directions: readonly AimDirection[] = ['e', 'se', 's', 'sw', 'w', 'nw', 'n', 'ne'];
-  const clockwiseAngle = (Math.atan2(y, x) * 180) / Math.PI;
-  const sector = Math.round(((clockwiseAngle + 360) % 360) / 45) % 8;
-  return directions[sector] as AimDirection;
-}
 
 function initialSnapshot(seed: string, stageId: TestSnapshot['stageId']): TestSnapshot {
   return {
@@ -30,8 +19,8 @@ function initialSnapshot(seed: string, stageId: TestSnapshot['stageId']): TestSn
       x: 0,
       y: 0,
       aimDirection: 'e',
-      health: 100,
-      maxHealth: 100,
+      health: PLAYER_CONFIG.maxHealth,
+      maxHealth: PLAYER_CONFIG.maxHealth,
       level: 1,
       xp: 0,
     },
@@ -52,6 +41,8 @@ export class FoundationTestRuntime implements SoulrunTestApi {
   private current: TestSnapshot;
   private remainderMs = 0;
   private random: Mulberry32Random;
+  private playerModel = new PlayerModel(PLAYER_CONFIG);
+  private readonly pressedInputs = new Set<TestInputCommand>();
   private readonly readyPromise: Promise<void>;
 
   constructor(mount: HTMLElement, seed: string, readyPromise: Promise<void>) {
@@ -71,6 +62,8 @@ export class FoundationTestRuntime implements SoulrunTestApi {
     stageId?: TestSnapshot['stageId'];
   }): Promise<void> {
     this.random = new Mulberry32Random(options.seed);
+    this.playerModel = new PlayerModel(PLAYER_CONFIG);
+    this.pressedInputs.clear();
     this.current = {
       ...initialSnapshot(options.seed, options.stageId ?? 'cemetery'),
       state: 'playing',
@@ -81,7 +74,12 @@ export class FoundationTestRuntime implements SoulrunTestApi {
   }
 
   input(command: TestInputCommand, pressed: boolean): void {
-    if (command !== 'pause' || !pressed) return;
+    if (command !== 'pause') {
+      if (pressed) this.pressedInputs.add(command);
+      else this.pressedInputs.delete(command);
+      return;
+    }
+    if (!pressed) return;
     const nextState: TestRuntimeState = this.current.state === 'paused' ? 'playing' : 'paused';
     if (this.current.state !== 'playing' && this.current.state !== 'paused') return;
     this.current = {
@@ -95,7 +93,7 @@ export class FoundationTestRuntime implements SoulrunTestApi {
   aimAt(x: number, y: number): void {
     this.current = {
       ...this.current,
-      player: { ...this.current.player, aimDirection: directionForVector(x, y) },
+      player: { ...this.current.player, aimDirection: aimDirectionForVector(x, y) },
       eventSequence: this.current.eventSequence + 1,
     };
   }
@@ -108,10 +106,31 @@ export class FoundationTestRuntime implements SoulrunTestApi {
     const steps = Math.floor((this.remainderMs + FIXED_STEP_MS * 1e-9) / FIXED_STEP_MS);
     this.remainderMs -= steps * FIXED_STEP_MS;
     const elapsed = steps * FIXED_STEP_MS;
+    const movement = normalizeMovement(
+      Number(this.pressedInputs.has('right')) - Number(this.pressedInputs.has('left')),
+      Number(this.pressedInputs.has('down')) - Number(this.pressedInputs.has('up')),
+    );
     this.current = {
       ...this.current,
       simulationTimeMs: this.current.simulationTimeMs + elapsed,
       stageTimeMs: this.current.stageTimeMs + elapsed,
+      player: {
+        ...this.current.player,
+        x: Math.max(
+          0,
+          Math.min(
+            WORLD_WIDTH,
+            this.current.player.x + movement.x * PLAYER_CONFIG.moveSpeed * (elapsed / 1000),
+          ),
+        ),
+        y: Math.max(
+          0,
+          Math.min(
+            WORLD_HEIGHT,
+            this.current.player.y + movement.y * PLAYER_CONFIG.moveSpeed * (elapsed / 1000),
+          ),
+        ),
+      },
     };
     await Promise.resolve();
   }
@@ -138,11 +157,12 @@ export class FoundationTestRuntime implements SoulrunTestApi {
   damagePlayer(amount: number): void {
     if (!Number.isFinite(amount) || amount < 0)
       throw new Error('Damage must be finite and non-negative');
-    const health = Math.max(0, this.current.player.health - amount);
+    const result = this.playerModel.damage(amount, this.current.simulationTimeMs);
+    if (!result.applied) return;
     this.current = {
       ...this.current,
-      state: health === 0 ? 'adventure-ended' : this.current.state,
-      player: { ...this.current.player, health },
+      state: result.died ? 'adventure-ended' : this.current.state,
+      player: { ...this.current.player, health: this.playerModel.health },
       eventSequence: this.current.eventSequence + 1,
     };
     this.reflectState();
@@ -161,6 +181,8 @@ export class FoundationTestRuntime implements SoulrunTestApi {
     }
     const seed = this.random.seed;
     this.random = new Mulberry32Random(seed);
+    this.playerModel = new PlayerModel(PLAYER_CONFIG);
+    this.pressedInputs.clear();
     this.current = initialSnapshot(seed, 'cemetery');
     this.remainderMs = 0;
     this.reflectState();

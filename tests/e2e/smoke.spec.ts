@@ -35,3 +35,40 @@ test('exposes a deterministic start, pause, and restart hook only in test mode',
   const snapshot = await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot());
   expect(snapshot).toMatchObject({ state: 'idle', seed: 'smoke-seed-001', eventSequence: 0 });
 });
+
+test('moves, aims, auto-fires, and pauses the playable Soul Guide', async ({ page }) => {
+  await page.goto('/');
+  await page.keyboard.press('Enter');
+
+  const root = page.locator('[data-testid="game-root"]');
+  await expect(root).toHaveAttribute('data-game-state', 'playing');
+  const startX = Number(await root.getAttribute('data-player-x'));
+
+  await page.keyboard.down('KeyD');
+  await page.waitForTimeout(300);
+  await page.keyboard.up('KeyD');
+  await expect
+    .poll(async () => Number(await root.getAttribute('data-player-x')))
+    .toBeGreaterThan(startX);
+
+  const canvas = page.locator('canvas');
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('Canvas bounds unavailable');
+  await page.mouse.move(box.x + box.width - 8, box.y + box.height / 2);
+  await expect(root).toHaveAttribute('data-aim-direction', 'e');
+  await expect
+    .poll(async () => Number(await root.getAttribute('data-ghost-arrow-count')))
+    .toBeGreaterThan(0);
+
+  await page.keyboard.down('Escape');
+  await page.waitForTimeout(50);
+  await page.keyboard.up('Escape');
+  await expect(root).toHaveAttribute('data-game-state', 'paused');
+  await page.keyboard.down('Escape');
+  await page.waitForTimeout(50);
+  await page.keyboard.up('Escape');
+  await expect(root).toHaveAttribute('data-game-state', 'playing');
+
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await expect(root).toHaveAttribute('data-game-state', 'paused');
+});

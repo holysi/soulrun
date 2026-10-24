@@ -60,4 +60,26 @@ describe('foundation test runtime', () => {
       simulationTimeMs: 0,
     });
   });
+
+  it('moves diagonally at normalized speed and applies damage cooldowns', async () => {
+    await runtime.startAdventure({ seed: TEST_SEEDS.smoke });
+    runtime.input('right', true);
+    runtime.input('down', true);
+    await runtime.advance(1000);
+    runtime.input('right', false);
+    runtime.input('down', false);
+
+    const moved = runtime.snapshot();
+    expect(Math.hypot(moved.player.x, moved.player.y)).toBeCloseTo(90, 8);
+    runtime.damagePlayer(20);
+    runtime.damagePlayer(20);
+    expect(runtime.snapshot().player.health).toBe(80);
+    await runtime.advance(600);
+    runtime.damagePlayer(20);
+    expect(runtime.snapshot().player.health).toBe(60);
+
+    runtime.input('right', true);
+    await runtime.advance(30_000);
+    expect(runtime.snapshot().player.x).toBe(1920);
+  });
 });
