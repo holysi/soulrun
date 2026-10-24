@@ -1,4 +1,6 @@
-import { FoundationTestRuntime } from './FoundationTestRuntime';
+import type Phaser from 'phaser';
+
+import { LiveGameTestAdapter } from './LiveGameTestAdapter';
 
 function canvasReady(): Promise<void> {
   return new Promise((resolve) => {
@@ -13,11 +15,11 @@ function canvasReady(): Promise<void> {
   });
 }
 
-export function installTestApi(mount: HTMLElement): void {
+export function installTestApi(game: Phaser.Game): void {
   const parameters = new URLSearchParams(window.location.search);
   const exposesTestApi = import.meta.env.MODE === 'development' || import.meta.env.MODE === 'test';
   if (!exposesTestApi || parameters.get('test') !== '1') return;
 
   const seed = parameters.get('seed') || 'smoke-seed-001';
-  window.__SOULRUN_TEST__ = new FoundationTestRuntime(mount, seed, canvasReady());
+  window.__SOULRUN_TEST__ = new LiveGameTestAdapter(game, seed, canvasReady());
 }

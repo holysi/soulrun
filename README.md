@@ -2,7 +2,7 @@
 
 《魂夜輪迴》是一款原創像素風、三關重複循環的瀏覽器生存遊戲。玩家以鍵盤移動引魂者、用滑鼠控制瞄準方向，並透過自動攻擊和冒險內升級持續迎戰敵群。
 
-目前 repository 提供可執行的 Phaser 基礎殼；玩法系統會依 [共享規格](docs/spec/README.md) 與 GitHub Issues 分階段實作。
+目前 repository 提供可操作的 Phaser 玩家核心；其餘玩法系統會依 [共享規格](docs/spec/README.md) 與 GitHub Issues 分階段實作。
 
 ## 環境需求
 
@@ -31,6 +31,7 @@ npm run typecheck    # 執行嚴格 TypeScript 型別檢查
 npm test             # 執行 Vitest 單元測試
 npm run test:e2e     # 以 Chromium 執行 Playwright smoke test
 npm run test:e2e:firefox # 以 Firefox 執行同一組 smoke test
+npm run test:e2e:preview # 驗證正式建置能正確提供必要 PNG 素材
 npm run art:build    # 從原創 ImageGen 母稿重建像素素材與預覽
 npm run art:validate # 驗證素材 schema、尺寸、動畫、色盤與透明度
 npm run build        # 型別檢查並產生 dist/ 正式建置

@@ -4,5 +4,6 @@ export default defineConfig({
   base: './',
   build: {
     sourcemap: true,
+    assetsInlineLimit: 0,
   },
 });

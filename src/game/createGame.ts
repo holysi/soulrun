@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 
 import { GAME_BACKGROUND, GAME_HEIGHT, GAME_WIDTH } from './constants';
 import { BootScene } from './scenes/BootScene';
+import { GameScene } from './scenes/GameScene';
+import { OverlayScene } from './scenes/OverlayScene';
 import { TitleScene } from './scenes/TitleScene';
 
 export function createGame(parent: string | HTMLElement): Phaser.Game {
@@ -25,6 +27,10 @@ export function createGame(parent: string | HTMLElement): Phaser.Game {
       width: GAME_WIDTH,
       height: GAME_HEIGHT,
     },
-    scene: [BootScene, TitleScene],
+    physics: {
+      default: 'arcade',
+      arcade: { gravity: { x: 0, y: 0 }, debug: false },
+    },
+    scene: [BootScene, TitleScene, GameScene, OverlayScene],
   });
 }

@@ -9,5 +9,5 @@ if (!app) {
   throw new Error('Missing #app game mount');
 }
 
-createGame(app);
-installTestApi(app);
+const game = createGame(app);
+installTestApi(game);
