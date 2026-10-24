@@ -1,4 +1,11 @@
 import manifest from '../../assets/manifest.json';
+import playerSoulGuideUrl from '../../assets/images/player-soul-guide.png?url';
+import weaponGhostArrowUrl from '../../assets/images/weapon-ghost-arrow.png?url';
+
+const bundledImageUrls: Readonly<Record<string, string>> = {
+  'player-soul-guide': playerSoulGuideUrl,
+  'weapon-ghost-arrow': weaponGhostArrowUrl,
+};
 
 interface CollisionDefinition {
   readonly shape: 'circle' | 'rect';
@@ -21,5 +28,7 @@ export interface ImageAssetDefinition {
 export function imageAsset(key: string): ImageAssetDefinition {
   const asset = manifest.images.find((candidate) => candidate.key === key);
   if (!asset) throw new Error(`Missing image asset: ${key}`);
-  return asset as ImageAssetDefinition;
+  const bundledPath = bundledImageUrls[key];
+  if (!bundledPath) throw new Error(`Image asset is not bundled for runtime use: ${key}`);
+  return { ...asset, path: bundledPath } as ImageAssetDefinition;
 }

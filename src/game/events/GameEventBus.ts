@@ -8,6 +8,14 @@ interface PointValue {
 }
 
 export interface GameEventMap {
+  'adventure:ended': {
+    readonly reason: 'player-defeated';
+    readonly score: number;
+    readonly level: number;
+    readonly completedLoops: number;
+    readonly survivalTimeMs: number;
+    readonly killsByEnemyId: Readonly<Record<string, number>>;
+  };
   'player:aim-changed': { readonly direction: AimDirection; readonly angleDeg: number };
   'player:health-changed': {
     readonly current: number;
@@ -57,6 +65,10 @@ export class GameEventPublisher {
     };
     this.emitter.emit(type, event);
     return event;
+  }
+
+  get currentSequence(): number {
+    return this.sequence;
   }
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BossSafetyWindow } from '../../src/game/player/BossSafetyWindow';
 import { PlayerModel } from '../../src/game/player/PlayerModel';
+import { ProjectileBudget } from '../../src/game/player/ProjectileBudget';
 import { aimDirectionForVector, normalizeMovement } from '../../src/game/player/direction';
 
 describe('player core', () => {
@@ -14,8 +15,14 @@ describe('player core', () => {
     expect(aimDirectionForVector(1, 0)).toBe('e');
     expect(aimDirectionForVector(0, 1)).toBe('s');
     expect(aimDirectionForVector(-1, -1)).toBe('nw');
-    const boundary = (22.5 * Math.PI) / 180;
-    expect(aimDirectionForVector(Math.cos(boundary), Math.sin(boundary))).toBe('se');
+    const boundaries = [22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5];
+    const clockwiseDirections = ['se', 's', 'sw', 'w', 'nw', 'n', 'ne', 'e'];
+    boundaries.forEach((degrees, index) => {
+      const radians = (degrees * Math.PI) / 180;
+      expect(aimDirectionForVector(Math.cos(radians), Math.sin(radians))).toBe(
+        clockwiseDirections[index],
+      );
+    });
   });
 
   it('applies damage once during the 600ms invulnerability window', () => {
@@ -43,5 +50,15 @@ describe('player core', () => {
     expect(safety.begin(1500)).toBe(3500);
     expect(safety.canDamagePlayer(3499.99)).toBe(false);
     expect(safety.canDamagePlayer(3500)).toBe(true);
+  });
+
+  it('reserves projectile patterns atomically and expires them in simulation time', () => {
+    const budget = new ProjectileBudget(2);
+    expect(budget.reservePattern(['arrow:1', 'arrow:2'], 100, 1200)).toBe(true);
+    expect(budget.reservePattern(['arrow:3'], 100, 1200)).toBe(false);
+    expect(budget.activeCount).toBe(2);
+    expect(budget.releaseExpired(100)).toEqual([]);
+    expect(budget.activeCount).toBe(2);
+    expect(budget.releaseExpired(1300)).toEqual(['arrow:1', 'arrow:2']);
   });
 });

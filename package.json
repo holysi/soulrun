@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test --project=chromium",
     "test:e2e:firefox": "playwright test --project=firefox",
+    "test:e2e:preview": "playwright test --config=playwright.preview.config.ts",
     "art:build": "node tools/art/build-vertical-slice.cjs",
     "art:validate": "node tools/art/validate-assets.cjs",
     "build": "tsc --noEmit && vite build",

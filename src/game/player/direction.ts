@@ -16,7 +16,8 @@ export function normalizeMovement(x: number, y: number): Vector2Value {
 export function aimDirectionForVector(x: number, y: number): AimDirection {
   if (x === 0 && y === 0) return 'e';
   const clockwiseAngle = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-  const sector = Math.round(clockwiseAngle / 45) % DIRECTIONS.length;
+  // The epsilon makes mathematically exact half-sector ties stable after trig conversion.
+  const sector = Math.floor((clockwiseAngle + 22.5 + 1e-10) / 45) % DIRECTIONS.length;
   return DIRECTIONS[sector] as AimDirection;
 }
 
