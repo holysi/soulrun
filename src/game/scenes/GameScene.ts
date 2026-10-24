@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 import { imageAsset } from '../assets';
-import { GAME_HEIGHT, HEAL_PICKUP_AMOUNT, SCENE_KEYS } from '../constants';
+import { HEAL_PICKUP_AMOUNT, SCENE_KEYS } from '../constants';
 import { GAME_CONFIG } from '../content';
 import { GameEventPublisher } from '../events/GameEventBus';
 import { BossSafetyWindow } from '../player/BossSafetyWindow';
@@ -25,6 +25,7 @@ import type {
   TestSnapshot,
   TestRuntimeState,
 } from '../testing/types';
+import { upgradeOptionAt } from '../ui/upgradeLayout';
 
 const PLAYER_ASSET_KEY = 'player-soul-guide';
 const PLAYER_CONFIG = GAME_CONFIG.player;
@@ -189,13 +190,7 @@ export class GameScene extends Phaser.Scene {
     }
     const selectedIndex = this.upgradeKeys.findIndex((key) => Phaser.Input.Keyboard.JustDown(key));
     if (selectedIndex >= 0 && this.progression.activeOffer) this.selectUpgrade(selectedIndex);
-    if (
-      this.paused ||
-      this.model.dead ||
-      this.upgradeFlow.modalActive ||
-      this.upgradeFlow.baseState === 'boss-cleanup'
-    )
-      return;
+    if (this.simulationSuspended()) return;
     this.runSimulation(delta, false);
   }
 
@@ -230,7 +225,10 @@ export class GameScene extends Phaser.Scene {
     this.testRemainderMs += ms;
     const steps = Math.floor((this.testRemainderMs + fixedStepMs * 1e-9) / fixedStepMs);
     this.testRemainderMs -= steps * fixedStepMs;
-    for (let step = 0; step < steps; step += 1) this.runSimulation(fixedStepMs, true);
+    for (let step = 0; step < steps; step += 1) {
+      if (this.simulationSuspended()) break;
+      this.runSimulation(fixedStepMs, true);
+    }
     await Promise.resolve();
   }
 
@@ -693,9 +691,8 @@ export class GameScene extends Phaser.Scene {
 
   private selectUpgradeWithPointer(pointer: Phaser.Input.Pointer): void {
     if (!this.progression.activeOffer) return;
-    const firstOptionY = GAME_HEIGHT / 2 - 8;
-    const index = Math.floor((pointer.y - firstOptionY) / 16);
-    if (index >= 0 && index <= 2) this.selectUpgrade(index);
+    const index = upgradeOptionAt(pointer.x, pointer.y);
+    if (index !== null) this.selectUpgrade(index);
   }
 
   private runSimulation(delta: number, manuallyIntegrateMovement: boolean): void {
@@ -755,6 +752,15 @@ export class GameScene extends Phaser.Scene {
       simulationSuspended: this.upgradeFlow.baseState === 'boss-cleanup',
       playerDead: this.model.dead,
     });
+  }
+
+  private simulationSuspended(): boolean {
+    return (
+      this.paused ||
+      this.model.dead ||
+      this.upgradeFlow.modalActive ||
+      this.upgradeFlow.baseState === 'boss-cleanup'
+    );
   }
 
   private syncSecondaryWeapons(): void {

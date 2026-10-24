@@ -11,11 +11,12 @@ test('pauses live simulation for a deterministic upgrade and resumes after selec
     await api.ready();
     await api.startAdventure({ seed: 'upgrade-seed-001' });
     await api.spawnXpGem({ value: 5, x: 960, y: 536 });
-    await api.advance(17);
+    await api.advance(1000);
   });
 
   const before = await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot());
   expect(before).toMatchObject({ state: 'level-up', player: { level: 2, xp: 0 } });
+  expect(before?.simulationTimeMs).toBeCloseTo(1000 / 60, 5);
   expect(before?.activeUpgradeOffer?.optionIds).toHaveLength(3);
   expect(new Set(before?.activeUpgradeOffer?.optionIds).size).toBe(3);
   if (process.env.CAPTURE_EVIDENCE === '1') {
@@ -66,6 +67,39 @@ test('pauses live simulation for a deterministic upgrade and resumes after selec
   const root = page.locator('[data-testid="game-root"]');
   await expect(root).not.toHaveAttribute('data-soul-blade-count', '0');
   await expect(root).not.toHaveAttribute('data-death-aura-count', '0');
+});
+
+test('uses bounded rendered rows for pointer upgrade selection', async ({ page }) => {
+  await page.goto('/?test=1&seed=upgrade-seed-001');
+  await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
+    await api.ready();
+    await api.startAdventure({ seed: 'upgrade-seed-001' });
+    await api.spawnXpGem({ value: 5, x: 960, y: 536 });
+    await api.advance(17);
+  });
+  const offer = await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot().activeUpgradeOffer);
+  const thirdOption = offer?.optionIds[2];
+  if (!thirdOption) throw new Error('Missing third upgrade option');
+
+  const canvas = page.locator('canvas');
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('Canvas bounds unavailable');
+  await page.mouse.click(box.x + (20 / 480) * box.width, box.y + (177 / 270) * box.height);
+  expect(
+    (await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot()))?.activeUpgradeOffer?.id,
+  ).toBe(offer?.id);
+
+  await page.mouse.click(box.x + (240 / 480) * box.width, box.y + (177 / 270) * box.height);
+  const selected = await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot());
+  expect(selected?.activeUpgradeOffer).toBeNull();
+  const selectedLevel =
+    selected?.weaponLevels[thirdOption] ??
+    selected?.passiveLevels[thirdOption] ??
+    selected?.masteryLevels[thirdOption];
+  expect(selectedLevel).toBe(thirdOption === 'ghost-arrow' ? 2 : 1);
 });
 
 test('freezes non-test Arcade motion during an upgrade and restores boss-fight state', async ({
