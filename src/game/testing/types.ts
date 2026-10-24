@@ -1,6 +1,6 @@
 export type AimDirection = 'e' | 'se' | 's' | 'sw' | 'w' | 'nw' | 'n' | 'ne';
 export type TestInputCommand = 'up' | 'down' | 'left' | 'right' | 'pause' | 'confirm';
-export type TestRuntimeState = 'idle' | 'playing' | 'paused' | 'adventure-ended';
+export type TestRuntimeState = 'idle' | 'playing' | 'level-up' | 'paused' | 'adventure-ended';
 
 export interface TestSnapshot {
   readonly state: TestRuntimeState;

@@ -8,6 +8,7 @@ interface PointValue {
 }
 
 export interface GameEventMap {
+  'adventure:started': { readonly seed: string; readonly adventureId: string };
   'adventure:ended': {
     readonly reason: 'player-defeated';
     readonly score: number;
@@ -29,11 +30,47 @@ export interface GameEventMap {
     readonly invulnerableUntilMs: number;
   };
   'player:died': { readonly sourceId: string };
+  'xp:spawned': {
+    readonly entityId: string;
+    readonly value: number;
+    readonly x: number;
+    readonly y: number;
+  };
+  'xp:collected': {
+    readonly entityId: string;
+    readonly value: number;
+    readonly totalXp: number;
+    readonly level: number;
+  };
+  'level:reached': { readonly level: number; readonly overflowXp: number };
+  'upgrade:offered': {
+    readonly offerId: string;
+    readonly source: 'level' | 'boss';
+    readonly optionIds: readonly string[];
+  };
+  'upgrade:selected': {
+    readonly offerId: string;
+    readonly optionId: string;
+    readonly newLevel: number;
+  };
   'weapon:fired': {
     readonly weaponId: string;
     readonly attackId: string;
     readonly origin: PointValue;
     readonly aim: PointValue;
+  };
+  'enemy:defeated': {
+    readonly entityId: string;
+    readonly enemyId: string;
+    readonly elite: boolean;
+    readonly scoreAwarded: number;
+    readonly xpGemValue: number;
+  };
+  'score:changed': { readonly score: number; readonly delta: number; readonly sourceId: string };
+  'boss:defeated': {
+    readonly bossId: string;
+    readonly stageId: string;
+    readonly scoreAwarded: number;
   };
   'game:pause-changed': { readonly paused: boolean; readonly reason: 'user' | 'blur' };
 }

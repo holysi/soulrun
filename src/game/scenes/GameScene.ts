@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 import { imageAsset } from '../assets';
-import { HEAL_PICKUP_AMOUNT, SCENE_KEYS } from '../constants';
+import { GAME_HEIGHT, HEAL_PICKUP_AMOUNT, SCENE_KEYS } from '../constants';
 import { GAME_CONFIG } from '../content';
 import { GameEventPublisher } from '../events/GameEventBus';
 import { BossSafetyWindow } from '../player/BossSafetyWindow';
@@ -9,6 +9,14 @@ import { PlayerModel } from '../player/PlayerModel';
 import { ProjectileBudget } from '../player/ProjectileBudget';
 import { aimDirectionForVector, normalizeMovement } from '../player/direction';
 import { publishPlayerDamage } from '../player/publishPlayerDamage';
+import {
+  ProgressionModel,
+  ScoreModel,
+  effectivePlayerStats,
+  effectiveWeaponStats,
+} from '../progression';
+import type { UpgradeOffer } from '../progression';
+import { createGameplayStreams } from '../random/RandomSource';
 import type {
   AimDirection,
   TestInputCommand,
@@ -31,6 +39,15 @@ const GHOST_ARROW_CONFIG = ghostArrowConfig();
 const ARROW_ASSET_KEY = GHOST_ARROW_CONFIG.assetKey;
 const PLAYER_ASSET = imageAsset(PLAYER_ASSET_KEY);
 const ARROW_ASSET = imageAsset(ARROW_ASSET_KEY);
+function weaponConfig(id: 'soul-blade' | 'death-aura') {
+  const weapon = GAME_CONFIG.weapons.find((candidate) => candidate.id === id);
+  if (!weapon) throw new Error(`${id} config is missing`);
+  return weapon;
+}
+const SOUL_BLADE_CONFIG = weaponConfig('soul-blade');
+const DEATH_AURA_CONFIG = weaponConfig('death-aura');
+const SOUL_BLADE_ASSET = imageAsset(SOUL_BLADE_CONFIG.assetKey);
+const DEATH_AURA_ASSET = imageAsset(DEATH_AURA_CONFIG.assetKey);
 
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
@@ -55,6 +72,16 @@ export class GameScene extends Phaser.Scene {
   private seed = '';
   private stageId: TestSnapshot['stageId'] = 'cemetery';
   private boss: TestSnapshot['boss'] = null;
+  private progression!: ProgressionModel;
+  private score = new ScoreModel(GAME_CONFIG);
+  private upgradeKeys!: Phaser.Input.Keyboard.Key[];
+  private xpEntityId = 0;
+  private readonly xpGems = new Map<string, number>();
+  private readonly soulBlades: Phaser.GameObjects.Image[] = [];
+  private deathAura!: Phaser.GameObjects.Image;
+  private nextAuraAtMs = 0;
+  private bladeOrbitAngle = 0;
+  private secondaryAttackId = 0;
 
   constructor() {
     super(SCENE_KEYS.game);
@@ -76,6 +103,11 @@ export class GameScene extends Phaser.Scene {
       frameHeight: PLAYER_ASSET.frameHeight,
     });
     this.load.image(ARROW_ASSET_KEY, ARROW_ASSET.path);
+    this.load.image(SOUL_BLADE_CONFIG.assetKey, SOUL_BLADE_ASSET.path);
+    this.load.spritesheet(DEATH_AURA_CONFIG.assetKey, DEATH_AURA_ASSET.path, {
+      frameWidth: DEATH_AURA_ASSET.frameWidth,
+      frameHeight: DEATH_AURA_ASSET.frameHeight,
+    });
   }
 
   create(): void {
@@ -93,17 +125,37 @@ export class GameScene extends Phaser.Scene {
     this.testAim = null;
     this.testRemainderMs = 0;
     this.boss = null;
+    this.progression = new ProgressionModel(
+      GAME_CONFIG,
+      createGameplayStreams(this.seed || 'local-adventure').upgrade,
+    );
+    this.score = new ScoreModel(GAME_CONFIG);
+    this.xpEntityId = 0;
+    this.xpGems.clear();
+    this.soulBlades.splice(0).forEach((blade) => blade.destroy());
+    this.nextAuraAtMs = 0;
+    this.bladeOrbitAngle = 0;
+    this.secondaryAttackId = 0;
     this.eventsOut = new GameEventPublisher(
       this.registry.events,
       'adventure-local-1',
       () => this.simulationTimeMs,
     );
+    this.eventsOut.emit('adventure:started', {
+      seed: this.seed || 'local-adventure',
+      adventureId: 'adventure-local-1',
+    });
     this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.drawWorld();
     this.createAnimations();
     this.createPlayer();
+    this.deathAura = this.add
+      .image(this.player.x, this.player.y, DEATH_AURA_CONFIG.assetKey)
+      .setDepth(1)
+      .setVisible(false);
     this.createObstacles();
     this.configureInput();
+    this.input.on(Phaser.Input.Events.POINTER_DOWN, this.selectUpgradeWithPointer, this);
 
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
@@ -120,6 +172,7 @@ export class GameScene extends Phaser.Scene {
     this.game.events.on(Phaser.Core.Events.BLUR, this.pauseForBlur, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off(Phaser.Core.Events.BLUR, this.pauseForBlur, this);
+      this.input.off(Phaser.Input.Events.POINTER_DOWN, this.selectUpgradeWithPointer, this);
       this.scene.stop(SCENE_KEYS.overlay);
     });
     if (this.testControlled) this.physics.world.pause();
@@ -128,7 +181,9 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (this.testControlled) return;
     if (Phaser.Input.Keyboard.JustDown(this.escapeKey)) this.setPaused(!this.paused, 'user');
-    if (this.paused || this.model.dead) return;
+    const selectedIndex = this.upgradeKeys.findIndex((key) => Phaser.Input.Keyboard.JustDown(key));
+    if (selectedIndex >= 0 && this.progression.activeOffer) this.selectUpgrade(selectedIndex);
+    if (this.paused || this.model.dead || this.progression.activeOffer) return;
     this.runSimulation(delta, false);
   }
 
@@ -152,7 +207,7 @@ export class GameScene extends Phaser.Scene {
     if (!Number.isFinite(ms) || ms < 0) {
       throw new Error('advance(ms) requires a finite non-negative value');
     }
-    if (this.paused || this.model.dead) return;
+    if (this.paused || this.model.dead || this.progression.activeOffer) return;
     const fixedStepMs = 1000 / 60;
     this.testRemainderMs += ms;
     const steps = Math.floor((this.testRemainderMs + fixedStepMs * 1e-9) / fixedStepMs);
@@ -167,6 +222,78 @@ export class GameScene extends Phaser.Scene {
     this.beginBossSafetyWindow();
   }
 
+  chooseUpgradeForTest(index: 0 | 1 | 2): void {
+    this.selectUpgrade(index);
+  }
+
+  spawnXpGem(value: number, x: number, y: number): string {
+    if (!Number.isInteger(value) || value < 0)
+      throw new Error('XP value must be a non-negative integer');
+    const entityId = `xp:${++this.xpEntityId}`;
+    this.xpGems.set(entityId, value);
+    this.eventsOut.emit('xp:spawned', { entityId, value, x, y });
+    return entityId;
+  }
+
+  collectXpGem(entityId: string): void {
+    const value = this.xpGems.get(entityId);
+    if (value === undefined) throw new Error(`Unknown or collected XP gem ${entityId}`);
+    this.xpGems.delete(entityId);
+    const reached = this.progression.collectXp(value);
+    this.eventsOut.emit('xp:collected', {
+      entityId,
+      value,
+      totalXp: this.progression.xp,
+      level: this.progression.level,
+    });
+    for (const level of reached) this.eventsOut.emit('level:reached', level);
+    this.offerNextQueuedLevel();
+    this.reflectState();
+  }
+
+  awardEnemyDefeat(
+    entityId: string,
+    enemyId: (typeof GAME_CONFIG.enemies)[number]['id'],
+    elite: boolean,
+    x: number,
+    y: number,
+    completedLoops = 0,
+  ): string {
+    const { score: scoreAwarded, xp } = this.score.awardEnemy(enemyId, elite, completedLoops);
+    const gemId = this.spawnXpGem(xp, x, y);
+    this.eventsOut.emit('enemy:defeated', {
+      entityId,
+      enemyId,
+      elite,
+      scoreAwarded,
+      xpGemValue: xp,
+    });
+    this.eventsOut.emit('score:changed', {
+      score: this.score.score,
+      delta: scoreAwarded,
+      sourceId: entityId,
+    });
+    return gemId;
+  }
+
+  awardBossDefeat(bossId: (typeof GAME_CONFIG.bosses)[number]['id'], completedLoops = 0): number {
+    const boss = GAME_CONFIG.bosses.find((candidate) => candidate.id === bossId);
+    if (!boss) throw new Error(`Unknown Boss ${bossId}`);
+    const scoreAwarded = this.score.awardBoss(bossId, completedLoops);
+    this.eventsOut.emit('boss:defeated', { bossId, stageId: boss.stageId, scoreAwarded });
+    this.eventsOut.emit('score:changed', {
+      score: this.score.score,
+      delta: scoreAwarded,
+      sourceId: bossId,
+    });
+    return scoreAwarded;
+  }
+
+  offerBossUpgrade(): void {
+    this.publishOffer(this.progression.offerBossUpgrade());
+    this.reflectState();
+  }
+
   damagePlayerForTest(amount: number): boolean {
     return this.boss
       ? this.damagePlayerFromBoss(amount, this.boss.id)
@@ -178,7 +305,10 @@ export class GameScene extends Phaser.Scene {
       ? 'adventure-ended'
       : this.paused
         ? 'paused'
-        : 'playing';
+        : this.progression.activeOffer
+          ? 'level-up'
+          : 'playing';
+    const progression = this.progression.snapshot();
     return {
       state,
       seed: this.seed,
@@ -192,16 +322,18 @@ export class GameScene extends Phaser.Scene {
         aimDirection: this.aimDirection,
         health: this.model.health,
         maxHealth: this.model.maxHealth,
-        level: 1,
-        xp: 0,
+        level: progression.level,
+        xp: progression.xp,
       },
-      score: 0,
-      weaponLevels: { 'ghost-arrow': 1 },
-      passiveLevels: {},
-      masteryLevels: {},
+      score: this.score.score,
+      weaponLevels: progression.weaponLevels,
+      passiveLevels: progression.passiveLevels,
+      masteryLevels: progression.masteryLevels,
       enemyCountsById: {},
       boss: this.boss,
-      activeUpgradeOffer: null,
+      activeUpgradeOffer: progression.activeOffer
+        ? { id: progression.activeOffer.id, optionIds: progression.activeOffer.optionIds }
+        : null,
       eventSequence: this.eventsOut.currentSequence,
     };
   }
@@ -220,9 +352,10 @@ export class GameScene extends Phaser.Scene {
   private applyDamage(amount: number, sourceId: string): boolean {
     const result = this.model.damage(amount, this.simulationTimeMs);
     if (!result.applied) return false;
+    const progression = this.progression.snapshot();
     publishPlayerDamage(this.eventsOut, result, this.model.health, this.model.maxHealth, sourceId, {
-      score: 0,
-      level: 1,
+      score: this.score.score,
+      level: progression.level,
       completedLoops: 0,
       survivalTimeMs: this.simulationTimeMs,
       killsByEnemyId: {},
@@ -266,6 +399,11 @@ export class GameScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
     this.escapeKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.upgradeKeys = [
+      keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
+      keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
+      keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
+    ];
   }
 
   private createPlayer(): void {
@@ -328,10 +466,13 @@ export class GameScene extends Phaser.Scene {
           (!this.testControlled && (this.movementKeys.up.isDown || this.cursors.up.isDown)),
       );
     const movement = normalizeMovement(x, y);
-    this.player.setVelocity(
-      movement.x * PLAYER_CONFIG.moveSpeed,
-      movement.y * PLAYER_CONFIG.moveSpeed,
+    const progression = this.progression.snapshot();
+    const playerStats = effectivePlayerStats(
+      progression.passiveLevels,
+      progression.masteryLevels,
+      GAME_CONFIG,
     );
+    this.player.setVelocity(movement.x * playerStats.moveSpeed, movement.y * playerStats.moveSpeed);
   }
 
   private updateAim(): void {
@@ -363,11 +504,25 @@ export class GameScene extends Phaser.Scene {
 
   private fireWhenReady(): void {
     if (this.simulationTimeMs < this.nextAttackAtMs) return;
-    this.nextAttackAtMs = this.simulationTimeMs + GHOST_ARROW_CONFIG.cooldownMs;
-    const attackId = `ghost-arrow:${this.attackId + 1}`;
+    const progression = this.progression.snapshot();
+    const weaponLevel = progression.weaponLevels['ghost-arrow'] ?? 1;
+    const stats = effectiveWeaponStats(
+      GHOST_ARROW_CONFIG,
+      weaponLevel,
+      progression.passiveLevels,
+      progression.masteryLevels,
+      GAME_CONFIG,
+    );
+    this.nextAttackAtMs = this.simulationTimeMs + stats.cooldownMs;
+    const nextAttackNumber = this.attackId + 1;
+    const projectileCount = stats.projectileCount ?? 1;
+    const projectileIds = Array.from(
+      { length: projectileCount },
+      (_, index) => `ghost-arrow:${nextAttackNumber}:${index + 1}`,
+    );
     if (
       !this.projectileBudget.reservePattern(
-        [attackId],
+        projectileIds,
         this.simulationTimeMs,
         GHOST_ARROW_CONFIG.projectileLifetimeMs,
       )
@@ -375,7 +530,6 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.attackId += 1;
-    const arrow = this.physics.add.image(this.player.x, this.player.y - 6, ARROW_ASSET_KEY);
     const collision = ARROW_ASSET.collision;
     if (
       collision?.shape !== 'rect' ||
@@ -384,25 +538,36 @@ export class GameScene extends Phaser.Scene {
     ) {
       throw new Error(`${ARROW_ASSET_KEY} requires rectangle collision data`);
     }
-    const body = arrow.body as Phaser.Physics.Arcade.Body;
-    body.setSize(collision.width, collision.height);
-    body.setOffset(
-      ARROW_ASSET.anchor.x * ARROW_ASSET.frameWidth + collision.offsetX - collision.width / 2,
-      ARROW_ASSET.anchor.y * ARROW_ASSET.frameHeight + collision.offsetY - collision.height / 2,
-    );
-    arrow.setDepth(2).setRotation(Math.atan2(this.aimVector.y, this.aimVector.x));
-    arrow.setVelocity(
-      this.aimVector.x * GHOST_ARROW_CONFIG.projectileSpeed,
-      this.aimVector.y * GHOST_ARROW_CONFIG.projectileSpeed,
-    );
-    this.arrows.set(attackId, arrow);
-    const mount = this.game.canvas.parentElement;
-    if (mount) mount.dataset.lastProjectileBody = `${body.width}x${body.height}`;
-    this.eventsOut.emit('weapon:fired', {
-      weaponId: 'ghost-arrow',
-      attackId,
-      origin: { x: this.player.x, y: this.player.y },
-      aim: { ...this.aimVector },
+    const collisionWidth = collision.width;
+    const collisionHeight = collision.height;
+    projectileIds.forEach((attackId, index) => {
+      const arrow = this.physics.add.image(this.player.x, this.player.y - 6, ARROW_ASSET_KEY);
+      const body = arrow.body as Phaser.Physics.Arcade.Body;
+      body.setSize(collisionWidth, collisionHeight);
+      body.setOffset(
+        ARROW_ASSET.anchor.x * ARROW_ASSET.frameWidth + collision.offsetX - collisionWidth / 2,
+        ARROW_ASSET.anchor.y * ARROW_ASSET.frameHeight + collision.offsetY - collisionHeight / 2,
+      );
+      const spread = Phaser.Math.DegToRad((index - (projectileCount - 1) / 2) * 8);
+      const angle = Math.atan2(this.aimVector.y, this.aimVector.x) + spread;
+      const aim = { x: Math.cos(angle), y: Math.sin(angle) };
+      arrow
+        .setDepth(2)
+        .setRotation(angle)
+        .setData({ damage: stats.damage, penetration: stats.penetration ?? 0 });
+      arrow.setVelocity(
+        aim.x * GHOST_ARROW_CONFIG.projectileSpeed,
+        aim.y * GHOST_ARROW_CONFIG.projectileSpeed,
+      );
+      this.arrows.set(attackId, arrow);
+      const mount = this.game.canvas.parentElement;
+      if (mount) mount.dataset.lastProjectileBody = `${body.width}x${body.height}`;
+      this.eventsOut.emit('weapon:fired', {
+        weaponId: 'ghost-arrow',
+        attackId,
+        origin: { x: this.player.x, y: this.player.y },
+        aim,
+      });
     });
   }
 
@@ -422,15 +587,67 @@ export class GameScene extends Phaser.Scene {
   private reflectState(): void {
     const mount = this.game.canvas.parentElement;
     if (!mount) return;
-    const state = this.model.dead ? 'adventure-ended' : this.paused ? 'paused' : 'playing';
+    const state = this.model.dead
+      ? 'adventure-ended'
+      : this.paused
+        ? 'paused'
+        : this.progression.activeOffer
+          ? 'level-up'
+          : 'playing';
     mount.dataset.gameState = state;
     if (this.testControlled) mount.dataset.testState = state;
     mount.dataset.playerX = this.player.x.toFixed(2);
     mount.dataset.playerY = this.player.y.toFixed(2);
     mount.dataset.aimDirection = this.aimDirection;
     mount.dataset.ghostArrowCount = String(this.attackId);
+    mount.dataset.soulBladeCount = String(this.soulBlades.length);
+    mount.dataset.deathAuraCount = String(this.secondaryAttackId);
     mount.dataset.activeProjectileCount = String(this.projectileBudget.activeCount);
     mount.dataset.eventSequence = String(this.eventsOut.currentSequence);
+  }
+
+  private offerNextQueuedLevel(): void {
+    const offer = this.progression.offerNextQueuedLevel();
+    if (offer) this.publishOffer(offer);
+  }
+
+  private publishOffer(offer: UpgradeOffer): void {
+    this.eventsOut.emit('upgrade:offered', {
+      offerId: offer.id,
+      source: offer.source,
+      optionIds: offer.optionIds,
+    });
+  }
+
+  private selectUpgrade(index: number): void {
+    const offer = this.progression.activeOffer;
+    const optionId = offer?.optionIds[index];
+    if (!offer || !optionId) throw new Error('No upgrade option is available at that index');
+    const applied = this.progression.select(optionId);
+    if (applied.maximumHealthAdded > 0) {
+      this.model.increaseMaxHealth(applied.maximumHealthAdded);
+      this.eventsOut.emit('player:health-changed', {
+        current: this.model.health,
+        maximum: this.model.maxHealth,
+        delta: applied.healing,
+        sourceId: optionId,
+      });
+    }
+    this.eventsOut.emit('upgrade:selected', {
+      offerId: offer.id,
+      optionId,
+      newLevel: applied.newLevel,
+    });
+    this.syncSecondaryWeapons();
+    this.offerNextQueuedLevel();
+    this.reflectState();
+  }
+
+  private selectUpgradeWithPointer(pointer: Phaser.Input.Pointer): void {
+    if (!this.progression.activeOffer) return;
+    const firstOptionY = GAME_HEIGHT / 2 - 8;
+    const index = Math.floor((pointer.y - firstOptionY) / 16);
+    if (index >= 0 && index <= 2) this.selectUpgrade(index);
   }
 
   private runSimulation(delta: number, manuallyIntegrateMovement: boolean): void {
@@ -452,12 +669,91 @@ export class GameScene extends Phaser.Scene {
       }
     }
     this.updateAnimation();
+    this.updateSecondaryWeapons(delta);
     for (const projectileId of this.projectileBudget.releaseExpired(this.simulationTimeMs)) {
       this.arrows.get(projectileId)?.destroy();
       this.arrows.delete(projectileId);
     }
     this.fireWhenReady();
     this.reflectState();
+  }
+
+  private syncSecondaryWeapons(): void {
+    const progression = this.progression.snapshot();
+    const bladeLevel = progression.weaponLevels['soul-blade'] ?? 0;
+    const desired =
+      bladeLevel === 0
+        ? 0
+        : (effectiveWeaponStats(
+            SOUL_BLADE_CONFIG,
+            bladeLevel,
+            progression.passiveLevels,
+            progression.masteryLevels,
+            GAME_CONFIG,
+          ).bladeCount ?? 0);
+    while (this.soulBlades.length < desired) {
+      this.soulBlades.push(
+        this.add.image(this.player.x, this.player.y, SOUL_BLADE_CONFIG.assetKey).setDepth(2),
+      );
+    }
+    while (this.soulBlades.length > desired) this.soulBlades.pop()?.destroy();
+  }
+
+  private updateSecondaryWeapons(delta: number): void {
+    const progression = this.progression.snapshot();
+    const bladeLevel = progression.weaponLevels['soul-blade'] ?? 0;
+    if (bladeLevel > 0) {
+      const stats = effectiveWeaponStats(
+        SOUL_BLADE_CONFIG,
+        bladeLevel,
+        progression.passiveLevels,
+        progression.masteryLevels,
+        GAME_CONFIG,
+      );
+      this.bladeOrbitAngle += Phaser.Math.DegToRad(
+        (stats.orbitSpeedDegPerSec ?? 0) * (delta / 1000),
+      );
+      this.soulBlades.forEach((blade, index) => {
+        const angle = this.bladeOrbitAngle + (index / this.soulBlades.length) * Math.PI * 2;
+        blade
+          .setPosition(
+            this.player.x + Math.cos(angle) * (stats.orbitRadius ?? 0),
+            this.player.y + Math.sin(angle) * (stats.orbitRadius ?? 0),
+          )
+          .setRotation(angle)
+          .setData('damage', stats.damage);
+      });
+    }
+    const auraLevel = progression.weaponLevels['death-aura'] ?? 0;
+    if (auraLevel === 0 || this.simulationTimeMs < this.nextAuraAtMs) return;
+    const stats = effectiveWeaponStats(
+      DEATH_AURA_CONFIG,
+      auraLevel,
+      progression.passiveLevels,
+      progression.masteryLevels,
+      GAME_CONFIG,
+    );
+    this.nextAuraAtMs = this.simulationTimeMs + stats.cooldownMs;
+    const radius = stats.effectRadius ?? 0;
+    this.deathAura
+      .setPosition(this.player.x, this.player.y)
+      .setDisplaySize(radius * 2, radius * 2)
+      .setData('damage', stats.damage)
+      .setAlpha(0.65)
+      .setVisible(true);
+    this.tweens.add({
+      targets: this.deathAura,
+      alpha: 0,
+      duration: 180,
+      onComplete: () => this.deathAura.setVisible(false),
+    });
+    const attackId = `death-aura:${++this.secondaryAttackId}`;
+    this.eventsOut.emit('weapon:fired', {
+      weaponId: 'death-aura',
+      attackId,
+      origin: { x: this.player.x, y: this.player.y },
+      aim: { x: 0, y: 0 },
+    });
   }
 
   private createAnimations(): void {
