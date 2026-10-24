@@ -26,6 +26,9 @@ test('pauses live simulation for a deterministic upgrade and resumes after selec
   expect(before).toMatchObject({ state: 'level-up', player: { level: 2, xp: 0 } });
   expect(before?.activeUpgradeOffer?.optionIds).toHaveLength(3);
   expect(new Set(before?.activeUpgradeOffer?.optionIds).size).toBe(3);
+  if (process.env.CAPTURE_EVIDENCE === '1') {
+    await page.screenshot({ path: 'docs/evidence/issue-7-progression.png' });
+  }
 
   await page.evaluate(async () => window.__SOULRUN_TEST__?.advance(1000));
   const paused = await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot());
