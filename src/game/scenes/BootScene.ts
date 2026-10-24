@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 import { SCENE_KEYS } from '../constants';
-import { CONTENT_CONFIG, validateContentConfig } from '../content';
+import { GAME_CONFIG, validateGameConfig } from '../content';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -9,7 +9,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
-    validateContentConfig(CONTENT_CONFIG);
+    validateGameConfig(GAME_CONFIG);
     this.scene.start(SCENE_KEYS.title);
   }
 }

@@ -1,4 +1,4 @@
-import type { BossAttack, BossConfig, ContentConfig, EnemyConfig, PressureStep } from './types';
+import type { BossAttack, BossConfig, EnemyConfig, GameConfig, PressureStep } from './types';
 
 const pressureSchedule = [
   { atMs: 0, spawnIntervalMs: 1000, batchSize: 1 },
@@ -11,7 +11,7 @@ const pressureSchedule = [
 
 const normalRewards = { normal: { xp: 1, score: 10 }, elite: { xp: 8, score: 100 } };
 
-export const ENEMIES = [
+const enemies = [
   {
     id: 'zombie',
     behavior: 'chase',
@@ -122,7 +122,7 @@ export const ENEMIES = [
 
 const attack = <T extends BossAttack>(value: T): T => value;
 
-export const BOSSES = [
+const bosses = [
   {
     id: 'graveyard-guardian',
     stageId: 'cemetery',
@@ -274,11 +274,20 @@ const sharedStage = {
   eliteTimesMs: [90_000, 150_000],
 } as const;
 
-export const CONTENT_CONFIG = {
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.values(value).forEach((child) => deepFreeze(child));
+    Object.freeze(value);
+  }
+  return value;
+}
+
+export const GAME_CONFIG = deepFreeze({
   schemaVersion: 1,
   world: {
     logicalWidth: 480,
     logicalHeight: 270,
+    updateHz: 60,
     mapWidth: 1920,
     mapHeight: 1072,
     maxEnemies: 120,
@@ -286,7 +295,16 @@ export const CONTENT_CONFIG = {
     safeSpawnRadius: 240,
     offscreenSpawnMargin: 32,
   },
-  elite: { healthMultiplier: 2.5, damageMultiplier: 1.5, scaleMultiplier: 1.25 },
+  player: {
+    maxHealth: 100,
+    moveSpeed: 90,
+    contactDamageCooldownMs: 250,
+    invulnerabilityMs: 600,
+    pickupRadius: 28,
+    startingWeaponId: 'ghost-arrow',
+    weaponSlots: 3,
+    postBossHealRatio: 0.3,
+  },
   stages: [
     {
       ...sharedStage,
@@ -345,6 +363,91 @@ export const CONTENT_CONFIG = {
       ],
     },
   ],
-  enemies: ENEMIES,
-  bosses: BOSSES,
-} as const satisfies ContentConfig;
+  enemies,
+  bosses,
+  weapons: [
+    {
+      id: 'ghost-arrow',
+      slot: 'directional',
+      maxLevel: 5,
+      cooldownMs: 900,
+      damage: 12,
+      assetKey: 'weapon-ghost-arrow',
+      audioKey: 'weapon-ghost-arrow',
+      projectileSpeed: 220,
+      projectileLifetimeMs: 1600,
+      projectileCount: 1,
+      penetration: 0,
+      levels: [
+        {},
+        { damageAdd: 6 },
+        { projectileCountAdd: 1 },
+        { penetrationAdd: 1 },
+        { cooldownMultiplier: 0.75 },
+      ],
+    },
+    {
+      id: 'soul-blade',
+      slot: 'orbiting',
+      maxLevel: 5,
+      cooldownMs: 0,
+      damage: 9,
+      assetKey: 'weapon-soul-blade',
+      audioKey: 'weapon-soul-blade',
+      bladeCount: 1,
+      orbitRadius: 48,
+      orbitSpeedDegPerSec: 120,
+      levels: [
+        {},
+        { bladeCountAdd: 1 },
+        { damageAdd: 5 },
+        { orbitRadiusAdd: 10, orbitSpeedAddDegPerSec: 30 },
+        { bladeCountAdd: 1 },
+      ],
+    },
+    {
+      id: 'death-aura',
+      slot: 'area',
+      maxLevel: 5,
+      cooldownMs: 1400,
+      damage: 10,
+      assetKey: 'vfx-death-aura',
+      audioKey: 'weapon-death-aura',
+      effectRadius: 52,
+      levels: [
+        {},
+        { effectRadiusAdd: 10 },
+        { damageAdd: 6 },
+        { cooldownMultiplier: 0.75 },
+        { effectRadiusAdd: 12, damageAdd: 4 },
+      ],
+    },
+  ],
+  passives: [
+    { id: 'cooldown-reduction', maxLevel: 5, perLevel: 0.06 },
+    { id: 'max-health', maxLevel: 5, perLevel: 15 },
+    { id: 'move-speed', maxLevel: 5, perLevel: 0.08 },
+    { id: 'pickup-range', maxLevel: 5, perLevel: 0.2 },
+    { id: 'weapon-damage', maxLevel: 5, perLevel: 0.1 },
+  ],
+  mastery: {
+    options: [
+      { id: 'mastery-damage', perPick: 0.03 },
+      { id: 'mastery-health', perPick: 5 },
+      { id: 'mastery-pickup', perPick: 0.05 },
+    ],
+  },
+  progression: {
+    xpByLevel: [5, 8, 12, 17, 23, 30, 38, 47, 57, 68, 80, 93, 107, 122, 138],
+    upgradeChoiceCount: 3,
+    maxLevelPolicy: 'extend-by-12-percent',
+    healDropChance: 0.05,
+    eliteHealthMultiplier: 2.5,
+    eliteDamageMultiplier: 1.5,
+    eliteScaleMultiplier: 1.25,
+  },
+  scoring: { loopMultiplierPerCompletion: 0.5 },
+} as const satisfies GameConfig);
+
+export const ENEMIES = GAME_CONFIG.enemies;
+export const BOSSES = GAME_CONFIG.bosses;

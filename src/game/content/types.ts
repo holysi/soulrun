@@ -160,24 +160,97 @@ export interface BossConfig {
   readonly attacks: readonly BossAttack[];
 }
 
-export interface ContentConfig {
+export interface WorldConfig {
+  readonly logicalWidth: number;
+  readonly logicalHeight: number;
+  readonly updateHz: number;
+  readonly mapWidth: number;
+  readonly mapHeight: number;
+  readonly maxEnemies: number;
+  readonly maxProjectiles: number;
+  readonly safeSpawnRadius: number;
+  readonly offscreenSpawnMargin: number;
+}
+
+export interface ProgressionConfig {
+  readonly xpByLevel: readonly number[];
+  readonly upgradeChoiceCount: number;
+  readonly maxLevelPolicy: 'extend-by-12-percent';
+  readonly healDropChance: number;
+  readonly eliteHealthMultiplier: number;
+  readonly eliteDamageMultiplier: number;
+  readonly eliteScaleMultiplier: number;
+}
+
+export interface WeaponLevelDelta {
+  readonly damageAdd?: number;
+  readonly projectileCountAdd?: number;
+  readonly penetrationAdd?: number;
+  readonly cooldownMultiplier?: number;
+  readonly bladeCountAdd?: number;
+  readonly orbitRadiusAdd?: number;
+  readonly orbitSpeedAddDegPerSec?: number;
+  readonly effectRadiusAdd?: number;
+}
+
+export interface WeaponConfig {
+  readonly id: 'ghost-arrow' | 'soul-blade' | 'death-aura';
+  readonly slot: 'directional' | 'orbiting' | 'area';
+  readonly maxLevel: 5;
+  readonly cooldownMs: number;
+  readonly damage: number;
+  readonly assetKey: string;
+  readonly audioKey: string;
+  readonly projectileSpeed?: number;
+  readonly projectileLifetimeMs?: number;
+  readonly projectileCount?: number;
+  readonly penetration?: number;
+  readonly bladeCount?: number;
+  readonly orbitRadius?: number;
+  readonly orbitSpeedDegPerSec?: number;
+  readonly effectRadius?: number;
+  readonly levels: readonly [
+    WeaponLevelDelta,
+    WeaponLevelDelta,
+    WeaponLevelDelta,
+    WeaponLevelDelta,
+    WeaponLevelDelta,
+  ];
+}
+
+export interface PassiveConfig {
+  readonly id:
+    'move-speed' | 'max-health' | 'weapon-damage' | 'cooldown-reduction' | 'pickup-range';
+  readonly maxLevel: 5;
+  readonly perLevel: number;
+}
+
+export interface MasteryConfig {
+  readonly options: readonly Readonly<{
+    id: 'mastery-damage' | 'mastery-health' | 'mastery-pickup';
+    perPick: number;
+  }>[];
+}
+
+export interface GameConfig {
   readonly schemaVersion: 1;
-  readonly world: Readonly<{
-    logicalWidth: number;
-    logicalHeight: number;
-    mapWidth: number;
-    mapHeight: number;
-    maxEnemies: number;
-    maxProjectiles: number;
-    safeSpawnRadius: number;
-    offscreenSpawnMargin: number;
-  }>;
-  readonly elite: Readonly<{
-    healthMultiplier: number;
-    damageMultiplier: number;
-    scaleMultiplier: number;
+  readonly world: WorldConfig;
+  readonly player: Readonly<{
+    maxHealth: number;
+    moveSpeed: number;
+    contactDamageCooldownMs: number;
+    invulnerabilityMs: number;
+    pickupRadius: number;
+    startingWeaponId: WeaponConfig['id'];
+    weaponSlots: number;
+    postBossHealRatio: number;
   }>;
   readonly stages: readonly StageConfig[];
   readonly enemies: readonly EnemyConfig[];
   readonly bosses: readonly BossConfig[];
+  readonly weapons: readonly WeaponConfig[];
+  readonly passives: readonly PassiveConfig[];
+  readonly mastery: MasteryConfig;
+  readonly progression: ProgressionConfig;
+  readonly scoring: Readonly<{ loopMultiplierPerCompletion: number }>;
 }

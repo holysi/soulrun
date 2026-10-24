@@ -1,6 +1,14 @@
-import type { ContentConfig, EnemyConfig, StageConfig } from './types';
+import type { EnemyConfig, GameConfig, StageConfig } from './types';
 
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const frozenPressureRows = [
+  { atMs: 0, spawnIntervalMs: 1000, batchSize: 1 },
+  { atMs: 30_000, spawnIntervalMs: 900, batchSize: 1 },
+  { atMs: 60_000, spawnIntervalMs: 800, batchSize: 1 },
+  { atMs: 90_000, spawnIntervalMs: 700, batchSize: 2 },
+  { atMs: 120_000, spawnIntervalMs: 600, batchSize: 2 },
+  { atMs: 150_000, spawnIntervalMs: 500, batchSize: 3 },
+] as const;
 
 function requirePositive(value: number, label: string): void {
   if (!Number.isFinite(value) || value <= 0)
@@ -39,8 +47,9 @@ function validatePool(
   }
 }
 
-export function validateContentConfig(config: ContentConfig): void {
+export function validateGameConfig(config: GameConfig): void {
   if (config.schemaVersion !== 1) throw new Error('Unsupported content schema version');
+  if (config.world.updateHz !== 60) throw new Error('World update rate must be 60 Hz');
   if (config.world.maxEnemies <= 0 || config.world.maxProjectiles <= 0) {
     throw new Error('Entity caps must be positive');
   }
@@ -72,8 +81,17 @@ export function validateContentConfig(config: ContentConfig): void {
     if ((stage.id === 'inferno') !== (stage.hazardLayer === 'hazards')) {
       throw new Error(`Stage ${stage.id} has invalid hazard layer`);
     }
-    const stepTimes = stage.pressureSchedule.map((step) => step.atMs);
-    if (stepTimes.join(',') !== '0,30000,60000,90000,120000,150000') {
+    const hasFrozenPressureRows =
+      stage.pressureSchedule.length === frozenPressureRows.length &&
+      stage.pressureSchedule.every((step, stepIndex) => {
+        const expected = frozenPressureRows[stepIndex];
+        return (
+          step.atMs === expected?.atMs &&
+          step.spawnIntervalMs === expected.spawnIntervalMs &&
+          step.batchSize === expected.batchSize
+        );
+      });
+    if (!hasFrozenPressureRows) {
       throw new Error(`Stage ${stage.id} has invalid pressure schedule`);
     }
     stage.pressureSchedule.forEach((step) => {
@@ -99,5 +117,9 @@ export function validateContentConfig(config: ContentConfig): void {
     if (boss.attacks.some((attack) => attack.telegraphMs <= 0 || attack.cooldownMs <= 0)) {
       throw new Error(`Boss ${boss.id} attacks require positive cooldowns and telegraphs`);
     }
+    boss.attacks.forEach((attack) => {
+      if (attack.kind === 'hazard') requirePositive(attack.tickMs, `${attack.id}.tickMs`);
+      if (attack.kind === 'charge') requirePositive(attack.recoveryMs, `${attack.id}.recoveryMs`);
+    });
   });
 }

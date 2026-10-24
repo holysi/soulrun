@@ -1,7 +1,7 @@
 import type { BossAttack, BossConfig } from './types';
 
 export type BossPhase = 1 | 2;
-export type BossAttackState = 'telegraph' | 'active' | 'cooldown' | 'complete';
+export type BossAttackState = 'telegraph' | 'active' | 'recovery' | 'cooldown' | 'complete';
 
 export function getBossPhase(boss: BossConfig, currentHealth: number): BossPhase {
   return currentHealth / boss.health <= boss.phaseThreshold ? 2 : 1;
@@ -26,7 +26,10 @@ export class BossAttackTimeline {
     if (elapsed < this.attack.telegraphMs) return 'telegraph';
     const activeMs = getActiveDuration(this.attack);
     if (elapsed < this.attack.telegraphMs + activeMs) return 'active';
-    if (elapsed < this.attack.telegraphMs + activeMs + this.cooldownMs) return 'cooldown';
+    const recoveryMs = this.attack.kind === 'charge' ? this.attack.recoveryMs : 0;
+    if (elapsed < this.attack.telegraphMs + activeMs + recoveryMs) return 'recovery';
+    if (elapsed < this.attack.telegraphMs + activeMs + recoveryMs + this.cooldownMs)
+      return 'cooldown';
     return 'complete';
   }
 

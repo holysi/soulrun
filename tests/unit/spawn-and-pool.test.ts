@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CONTENT_CONFIG, isLegalSpawn, ObjectPool, planSpawnBatch } from '../../src/game/content';
+import { GAME_CONFIG, isLegalSpawn, ObjectPool, planSpawnBatch } from '../../src/game/content';
 import { Mulberry32Random } from '../../src/game/random/RandomSource';
 
 describe('spawn planning and object pools', () => {
@@ -21,7 +21,7 @@ describe('spawn planning and object pools', () => {
       activeEnemies: 120,
       maxEnemies: 120,
       elite: false,
-      stage: CONTENT_CONFIG.stages[0],
+      stage: GAME_CONFIG.stages[0],
       cameraBounds: { x: 720, y: 401, width: 480, height: 270 },
       player: { x: 960, y: 536 },
       safeSpawnRadius: 240,
@@ -38,7 +38,7 @@ describe('spawn planning and object pools', () => {
       activeEnemies: 0,
       maxEnemies: 120,
       elite: false,
-      stage: CONTENT_CONFIG.stages[0],
+      stage: GAME_CONFIG.stages[0],
       cameraBounds: { x: 720, y: 401, width: 480, height: 270 },
       player: { x: 960, y: 536 },
       safeSpawnRadius: 240,

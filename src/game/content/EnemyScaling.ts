@@ -1,5 +1,5 @@
 import { roundHalfUp } from './WaveScheduler';
-import type { ContentConfig, EnemyConfig, StageConfig } from './types';
+import type { EnemyConfig, ProgressionConfig, StageConfig } from './types';
 
 export interface ScaledEnemyStats {
   readonly maximumHealth: number;
@@ -14,7 +14,7 @@ export function scaleEnemyStats(
   elite: boolean,
   capStacks: number,
   cap: StageConfig['capEscalation'],
-  eliteConfig: ContentConfig['elite'],
+  progression: ProgressionConfig,
 ): ScaledEnemyStats {
   if (!Number.isInteger(completedLoops) || completedLoops < 0) {
     throw new Error('Completed loops must be a non-negative integer');
@@ -24,9 +24,9 @@ export function scaleEnemyStats(
   }
   if (elite && !enemy.eliteEligible) throw new Error(`${enemy.id} cannot become elite`);
 
-  const eliteHealth = elite ? eliteConfig.healthMultiplier : 1;
-  const eliteDamage = elite ? eliteConfig.damageMultiplier : 1;
-  const eliteScale = elite ? eliteConfig.scaleMultiplier : 1;
+  const eliteHealth = elite ? progression.eliteHealthMultiplier : 1;
+  const eliteDamage = elite ? progression.eliteDamageMultiplier : 1;
+  const eliteScale = elite ? progression.eliteScaleMultiplier : 1;
   const health = enemy.health * (1 + 0.35 * completedLoops) * eliteHealth;
   const damage = enemy.contactDamage * (1 + 0.2 * completedLoops) * eliteDamage;
 

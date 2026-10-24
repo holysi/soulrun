@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CapEscalation,
-  CONTENT_CONFIG,
+  GAME_CONFIG,
   effectiveSpawnInterval,
   scaleEnemyStats,
   WaveScheduler,
 } from '../../src/game/content';
 
-const cemetery = CONTENT_CONFIG.stages[0];
+const cemetery = GAME_CONFIG.stages[0];
 
 describe('wave scheduler', () => {
   it('changes pressure on exact 30-second boundaries without duplicate spawns', () => {
@@ -37,9 +37,9 @@ describe('wave scheduler', () => {
   });
 
   it('applies loop, elite, then cap scaling with final half-up rounding', () => {
-    const zombie = CONTENT_CONFIG.enemies[0];
+    const zombie = GAME_CONFIG.enemies[0];
     expect(
-      scaleEnemyStats(zombie, 1, true, 2, cemetery.capEscalation, CONTENT_CONFIG.elite),
+      scaleEnemyStats(zombie, 1, true, 2, cemetery.capEscalation, GAME_CONFIG.progression),
     ).toEqual({ maximumHealth: 123, damage: 15, moveSpeed: 43.26, radius: 8.75 });
   });
 });

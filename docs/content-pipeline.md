@@ -1,10 +1,10 @@
 # Content Pipeline
 
-`src/game/content/contentConfig.ts` is the authored source for stage, enemy,
-elite, and Boss content. Runtime systems consume the exported readonly config;
-they do not embed balance values in scenes.
+`src/game/content/contentConfig.ts` exports the single immutable `GAME_CONFIG`
+root. Runtime systems consume its stage, enemy, Boss, progression, and world
+sections; they do not embed balance values in scenes.
 
-Call `validateContentConfig` during boot before creating gameplay entities. A
+Call `validateGameConfig` during boot before creating gameplay entities. A
 validation error is fatal because it indicates an unresolved ID, invalid
 schedule, unsorted weighted pool, or broken Boss/stage relationship.
 
