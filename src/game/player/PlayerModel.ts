@@ -11,19 +11,30 @@ export interface DamageResult {
 }
 
 export class PlayerModel {
-  readonly maxHealth: number;
+  private maximumHealth: number;
   readonly invulnerabilityMs: number;
   health: number;
   invulnerableUntilMs = 0;
 
   constructor(config: PlayerModelConfig) {
-    this.maxHealth = config.maxHealth;
+    this.maximumHealth = config.maxHealth;
     this.invulnerabilityMs = config.invulnerabilityMs;
     this.health = config.maxHealth;
   }
 
   get dead(): boolean {
     return this.health === 0;
+  }
+
+  get maxHealth(): number {
+    return this.maximumHealth;
+  }
+
+  increaseMaxHealth(amount: number): number {
+    assertNonNegativeFinite(amount, 'Maximum health increase');
+    this.maximumHealth += amount;
+    this.health += amount;
+    return amount;
   }
 
   damage(amount: number, simulationTimeMs: number): DamageResult {

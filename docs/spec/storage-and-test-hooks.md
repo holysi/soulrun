@@ -73,6 +73,7 @@ interface SoulrunTestApi {
   aimAt(x: number, y: number): void;
   advance(ms: number): Promise<void>;
   chooseUpgrade(index: 0|1|2): Promise<void>;
+  spawnXpGem(options: { value: number; x: number; y: number }): Promise<string>;
   snapshot(): Readonly<TestSnapshot>;
   forceBoss(): Promise<void>;
   damagePlayer(amount: number): void;
@@ -84,7 +85,7 @@ interface SoulrunTestApi {
 `stageTimeMs`, `completedLoops`, `player` (`x`, `y`, `aimDirection`, `health`,
 `maxHealth`, `level`, `xp`), `score`, `weaponLevels`, `passiveLevels`,
 `masteryLevels`, `enemyCountsById`, `boss` (`id`, `health`, `phase`) or `null`,
-`activeUpgradeOffer`, and `eventSequence`. Snapshots contain plain values,
+`activeUpgradeOffer` (`id`, `source`, and `optionIds`), and `eventSequence`. Snapshots contain plain values,
 sorted key maps, no Phaser objects, wall-clock time, or display coordinates.
 
 `advance(ms)` steps a fixed `1000/60` clock and resolves only after render/event

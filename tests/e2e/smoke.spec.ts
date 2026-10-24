@@ -87,9 +87,10 @@ test('drives the live GameScene through the deterministic API', async ({ page })
 
 test('moves, aims, auto-fires, and pauses the playable Soul Guide', async ({ page }) => {
   await page.goto('/');
+  const root = page.locator('[data-testid="game-root"]');
+  await expect(root).toHaveAttribute('data-game-state', 'title');
   await page.keyboard.press('Enter');
 
-  const root = page.locator('[data-testid="game-root"]');
   await expect(root).toHaveAttribute('data-game-state', 'playing');
   const startX = Number(await root.getAttribute('data-player-x'));
 
