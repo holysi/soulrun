@@ -12,8 +12,10 @@ import { publishPlayerDamage } from '../player/publishPlayerDamage';
 import {
   ProgressionModel,
   ScoreModel,
+  UpgradeFlow,
   effectivePlayerStats,
   effectiveWeaponStats,
+  synchronizePhysicsWorld,
 } from '../progression';
 import type { UpgradeOffer } from '../progression';
 import { createGameplayStreams } from '../random/RandomSource';
@@ -73,10 +75,11 @@ export class GameScene extends Phaser.Scene {
   private stageId: TestSnapshot['stageId'] = 'cemetery';
   private boss: TestSnapshot['boss'] = null;
   private progression!: ProgressionModel;
+  private readonly upgradeFlow = new UpgradeFlow();
   private score = new ScoreModel(GAME_CONFIG);
   private upgradeKeys!: Phaser.Input.Keyboard.Key[];
   private xpEntityId = 0;
-  private readonly xpGems = new Map<string, number>();
+  private readonly xpGems = new Map<string, { value: number; x: number; y: number }>();
   private readonly soulBlades: Phaser.GameObjects.Image[] = [];
   private deathAura!: Phaser.GameObjects.Image;
   private nextAuraAtMs = 0;
@@ -129,6 +132,7 @@ export class GameScene extends Phaser.Scene {
       GAME_CONFIG,
       createGameplayStreams(this.seed || 'local-adventure').upgrade,
     );
+    this.upgradeFlow.reset();
     this.score = new ScoreModel(GAME_CONFIG);
     this.xpEntityId = 0;
     this.xpGems.clear();
@@ -175,15 +179,23 @@ export class GameScene extends Phaser.Scene {
       this.input.off(Phaser.Input.Events.POINTER_DOWN, this.selectUpgradeWithPointer, this);
       this.scene.stop(SCENE_KEYS.overlay);
     });
-    if (this.testControlled) this.physics.world.pause();
+    this.syncPhysicsPause();
   }
 
   update(_time: number, delta: number): void {
     if (this.testControlled) return;
-    if (Phaser.Input.Keyboard.JustDown(this.escapeKey)) this.setPaused(!this.paused, 'user');
+    if (!this.upgradeFlow.modalActive && Phaser.Input.Keyboard.JustDown(this.escapeKey)) {
+      this.setPaused(!this.paused, 'user');
+    }
     const selectedIndex = this.upgradeKeys.findIndex((key) => Phaser.Input.Keyboard.JustDown(key));
     if (selectedIndex >= 0 && this.progression.activeOffer) this.selectUpgrade(selectedIndex);
-    if (this.paused || this.model.dead || this.progression.activeOffer) return;
+    if (
+      this.paused ||
+      this.model.dead ||
+      this.upgradeFlow.modalActive ||
+      this.upgradeFlow.baseState === 'boss-cleanup'
+    )
+      return;
     this.runSimulation(delta, false);
   }
 
@@ -207,7 +219,13 @@ export class GameScene extends Phaser.Scene {
     if (!Number.isFinite(ms) || ms < 0) {
       throw new Error('advance(ms) requires a finite non-negative value');
     }
-    if (this.paused || this.model.dead || this.progression.activeOffer) return;
+    if (
+      this.paused ||
+      this.model.dead ||
+      this.upgradeFlow.modalActive ||
+      this.upgradeFlow.baseState === 'boss-cleanup'
+    )
+      return;
     const fixedStepMs = 1000 / 60;
     this.testRemainderMs += ms;
     const steps = Math.floor((this.testRemainderMs + fixedStepMs * 1e-9) / fixedStepMs);
@@ -218,8 +236,11 @@ export class GameScene extends Phaser.Scene {
 
   forceBossForTest(): void {
     if (this.model.dead) throw new Error('Boss can only be forced during play');
+    this.upgradeFlow.enterBaseState('boss-fight');
     this.boss = { id: 'graveyard-guardian', health: 1000, phase: 1 };
     this.beginBossSafetyWindow();
+    this.syncPhysicsPause();
+    this.reflectState();
   }
 
   chooseUpgradeForTest(index: 0 | 1 | 2): void {
@@ -230,15 +251,16 @@ export class GameScene extends Phaser.Scene {
     if (!Number.isInteger(value) || value < 0)
       throw new Error('XP value must be a non-negative integer');
     const entityId = `xp:${++this.xpEntityId}`;
-    this.xpGems.set(entityId, value);
+    this.xpGems.set(entityId, { value, x, y });
     this.eventsOut.emit('xp:spawned', { entityId, value, x, y });
     return entityId;
   }
 
   collectXpGem(entityId: string): void {
-    const value = this.xpGems.get(entityId);
-    if (value === undefined) throw new Error(`Unknown or collected XP gem ${entityId}`);
+    const gem = this.xpGems.get(entityId);
+    if (!gem) throw new Error(`Unknown or collected XP gem ${entityId}`);
     this.xpGems.delete(entityId);
+    const { value } = gem;
     const reached = this.progression.collectXp(value);
     this.eventsOut.emit('xp:collected', {
       entityId,
@@ -247,7 +269,7 @@ export class GameScene extends Phaser.Scene {
       level: this.progression.level,
     });
     for (const level of reached) this.eventsOut.emit('level:reached', level);
-    this.offerNextQueuedLevel();
+    if (this.upgradeFlow.baseState !== 'boss-cleanup') this.offerNextQueuedLevel();
     this.reflectState();
   }
 
@@ -290,8 +312,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   offerBossUpgrade(): void {
-    this.publishOffer(this.progression.offerBossUpgrade());
+    const offer = this.progression.offerBossUpgrade();
+    this.upgradeFlow.openBossUpgrade();
+    this.publishOffer(offer);
+    this.syncPhysicsPause();
     this.reflectState();
+  }
+
+  beginBossCleanup(): void {
+    this.upgradeFlow.enterBaseState('boss-cleanup');
+    this.syncPhysicsPause();
+    this.reflectState();
+  }
+
+  resolveBossCleanupLevelUps(): void {
+    if (this.upgradeFlow.baseState !== 'boss-cleanup') {
+      throw new Error('Queued cleanup levels require boss-cleanup state');
+    }
+    this.offerNextQueuedLevel();
   }
 
   damagePlayerForTest(amount: number): boolean {
@@ -305,9 +343,7 @@ export class GameScene extends Phaser.Scene {
       ? 'adventure-ended'
       : this.paused
         ? 'paused'
-        : this.progression.activeOffer
-          ? 'level-up'
-          : 'playing';
+        : this.upgradeFlow.state;
     const progression = this.progression.snapshot();
     return {
       state,
@@ -332,19 +368,23 @@ export class GameScene extends Phaser.Scene {
       enemyCountsById: {},
       boss: this.boss,
       activeUpgradeOffer: progression.activeOffer
-        ? { id: progression.activeOffer.id, optionIds: progression.activeOffer.optionIds }
+        ? {
+            id: progression.activeOffer.id,
+            source: progression.activeOffer.source,
+            optionIds: progression.activeOffer.optionIds,
+          }
         : null,
       eventSequence: this.eventsOut.currentSequence,
     };
   }
 
   damagePlayer(amount: number, sourceId = 'contact'): boolean {
-    if (this.paused || this.model.dead) return false;
+    if (this.paused || this.model.dead || this.upgradeFlow.modalActive) return false;
     return this.applyDamage(amount, sourceId);
   }
 
   damagePlayerFromBoss(amount: number, bossId: string): boolean {
-    if (this.paused || this.model.dead) return false;
+    if (this.paused || this.model.dead || this.upgradeFlow.modalActive) return false;
     if (!this.bossSafety.canDamagePlayer(this.simulationTimeMs)) return false;
     return this.applyDamage(amount, `boss:${bossId}`);
   }
@@ -572,10 +612,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setPaused(paused: boolean, reason: 'user' | 'blur'): void {
+    if (reason === 'user' && this.upgradeFlow.modalActive) return;
     if (this.paused === paused || this.model.dead) return;
     this.paused = paused;
-    if (paused || this.testControlled) this.physics.world.pause();
-    else this.physics.world.resume();
+    this.syncPhysicsPause();
     this.eventsOut.emit('game:pause-changed', { paused, reason });
     this.reflectState();
   }
@@ -591,9 +631,7 @@ export class GameScene extends Phaser.Scene {
       ? 'adventure-ended'
       : this.paused
         ? 'paused'
-        : this.progression.activeOffer
-          ? 'level-up'
-          : 'playing';
+        : this.upgradeFlow.state;
     mount.dataset.gameState = state;
     if (this.testControlled) mount.dataset.testState = state;
     mount.dataset.playerX = this.player.x.toFixed(2);
@@ -603,12 +641,19 @@ export class GameScene extends Phaser.Scene {
     mount.dataset.soulBladeCount = String(this.soulBlades.length);
     mount.dataset.deathAuraCount = String(this.secondaryAttackId);
     mount.dataset.activeProjectileCount = String(this.projectileBudget.activeCount);
+    const firstProjectile = this.arrows.values().next().value;
+    if (firstProjectile) mount.dataset.firstProjectileX = firstProjectile.x.toFixed(2);
+    else delete mount.dataset.firstProjectileX;
     mount.dataset.eventSequence = String(this.eventsOut.currentSequence);
   }
 
   private offerNextQueuedLevel(): void {
     const offer = this.progression.offerNextQueuedLevel();
-    if (offer) this.publishOffer(offer);
+    if (!offer) return;
+    this.upgradeFlow.openLevelUp();
+    this.publishOffer(offer);
+    this.syncPhysicsPause();
+    this.reflectState();
   }
 
   private publishOffer(offer: UpgradeOffer): void {
@@ -639,7 +684,10 @@ export class GameScene extends Phaser.Scene {
       newLevel: applied.newLevel,
     });
     this.syncSecondaryWeapons();
-    this.offerNextQueuedLevel();
+    const nextOffer = this.progression.offerNextQueuedLevel();
+    this.upgradeFlow.finishOffer(nextOffer !== null);
+    if (nextOffer) this.publishOffer(nextOffer);
+    this.syncPhysicsPause();
     this.reflectState();
   }
 
@@ -668,6 +716,7 @@ export class GameScene extends Phaser.Scene {
         );
       }
     }
+    this.collectNearbyXpGems();
     this.updateAnimation();
     this.updateSecondaryWeapons(delta);
     for (const projectileId of this.projectileBudget.releaseExpired(this.simulationTimeMs)) {
@@ -676,6 +725,36 @@ export class GameScene extends Phaser.Scene {
     }
     this.fireWhenReady();
     this.reflectState();
+  }
+
+  private collectNearbyXpGems(): void {
+    const progression = this.progression.snapshot();
+    const { pickupRadius } = effectivePlayerStats(
+      progression.passiveLevels,
+      progression.masteryLevels,
+      GAME_CONFIG,
+    );
+    const nearby = [...this.xpGems.entries()]
+      .filter(
+        ([, gem]) =>
+          Phaser.Math.Distance.Between(this.player.x, this.player.y, gem.x, gem.y) <= pickupRadius,
+      )
+      .map(([entityId]) => entityId)
+      .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    for (const entityId of nearby) {
+      this.collectXpGem(entityId);
+      if (this.upgradeFlow.modalActive) break;
+    }
+  }
+
+  private syncPhysicsPause(): void {
+    synchronizePhysicsWorld(this.physics.world, {
+      testControlled: this.testControlled,
+      userPaused: this.paused,
+      modalActive: this.upgradeFlow.modalActive,
+      simulationSuspended: this.upgradeFlow.baseState === 'boss-cleanup',
+      playerDead: this.model.dead,
+    });
   }
 
   private syncSecondaryWeapons(): void {

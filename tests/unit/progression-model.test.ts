@@ -38,6 +38,10 @@ describe('ProgressionModel', () => {
     expect(left.offerNextQueuedLevel()?.optionIds).toEqual(right.offerNextQueuedLevel()?.optionIds);
   });
 
+  it('marks a forced Boss offer with its distinct source', () => {
+    expect(model().offerBossUpgrade()).toMatchObject({ source: 'boss' });
+  });
+
   it('caps all three weapons at five and all five passives at five', () => {
     const progression = model('caps-seed');
     progression.collectXp(100_000);

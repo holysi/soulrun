@@ -83,6 +83,12 @@ export class LiveGameTestAdapter implements SoulrunTestApi {
     await Promise.resolve();
   }
 
+  async spawnXpGem(options: { value: number; x: number; y: number }): Promise<string> {
+    const entityId = this.scene().spawnXpGem(options.value, options.x, options.y);
+    await Promise.resolve();
+    return entityId;
+  }
+
   snapshot(): Readonly<TestSnapshot> {
     if (!this.game.scene.isActive(SCENE_KEYS.game)) return idleSnapshot(this.seed);
     return structuredClone(this.scene().snapshotForTest());
