@@ -78,8 +78,15 @@ export class LiveGameTestAdapter implements SoulrunTestApi {
     return this.scene().advanceForTest(ms);
   }
 
-  async chooseUpgrade(): Promise<void> {
-    throw new Error('No upgrade option is available at that index');
+  async chooseUpgrade(index: 0 | 1 | 2): Promise<void> {
+    this.scene().chooseUpgradeForTest(index);
+    await Promise.resolve();
+  }
+
+  async spawnXpGem(options: { value: number; x: number; y: number }): Promise<string> {
+    const entityId = this.scene().spawnXpGem(options.value, options.x, options.y);
+    await Promise.resolve();
+    return entityId;
   }
 
   snapshot(): Readonly<TestSnapshot> {

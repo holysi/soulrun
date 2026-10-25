@@ -1,6 +1,14 @@
 export type AimDirection = 'e' | 'se' | 's' | 'sw' | 'w' | 'nw' | 'n' | 'ne';
 export type TestInputCommand = 'up' | 'down' | 'left' | 'right' | 'pause' | 'confirm';
-export type TestRuntimeState = 'idle' | 'playing' | 'paused' | 'adventure-ended';
+export type TestRuntimeState =
+  | 'idle'
+  | 'playing'
+  | 'boss-fight'
+  | 'boss-cleanup'
+  | 'level-up'
+  | 'upgrade-choice'
+  | 'paused'
+  | 'adventure-ended';
 
 export interface TestSnapshot {
   readonly state: TestRuntimeState;
@@ -24,7 +32,11 @@ export interface TestSnapshot {
   readonly masteryLevels: Readonly<Record<string, number>>;
   readonly enemyCountsById: Readonly<Record<string, number>>;
   readonly boss: Readonly<{ id: string; health: number; phase: 1 | 2 }> | null;
-  readonly activeUpgradeOffer: Readonly<{ id: string; optionIds: readonly string[] }> | null;
+  readonly activeUpgradeOffer: Readonly<{
+    id: string;
+    source: 'level' | 'boss';
+    optionIds: readonly string[];
+  }> | null;
   readonly eventSequence: number;
 }
 
@@ -36,6 +48,7 @@ export interface SoulrunTestApi {
   aimAt(x: number, y: number): void;
   advance(ms: number): Promise<void>;
   chooseUpgrade(index: 0 | 1 | 2): Promise<void>;
+  spawnXpGem(options: { value: number; x: number; y: number }): Promise<string>;
   snapshot(): Readonly<TestSnapshot>;
   forceBoss(): Promise<void>;
   damagePlayer(amount: number): void;

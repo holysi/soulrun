@@ -9,6 +9,8 @@ export class TitleScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor('#09070d');
+    const mount = this.game.canvas.parentElement;
+    if (mount) mount.dataset.gameState = 'title';
 
     this.add
       .text(GAME_WIDTH / 2, 82, '魂夜輪迴', {
