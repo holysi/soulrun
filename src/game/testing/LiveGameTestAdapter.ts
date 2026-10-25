@@ -99,6 +99,13 @@ export class LiveGameTestAdapter implements SoulrunTestApi {
     await Promise.resolve();
   }
 
+  damageBoss(amount: number): void {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error('Damage must be finite and non-negative');
+    }
+    this.scene().damageBossForTest(amount);
+  }
+
   damagePlayer(amount: number): void {
     if (!Number.isFinite(amount) || amount < 0) {
       throw new Error('Damage must be finite and non-negative');

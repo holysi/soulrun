@@ -51,6 +51,7 @@ export interface SoulrunTestApi {
   spawnXpGem(options: { value: number; x: number; y: number }): Promise<string>;
   snapshot(): Readonly<TestSnapshot>;
   forceBoss(): Promise<void>;
+  damageBoss(amount: number): void;
   damagePlayer(amount: number): void;
   reset(options?: { clearStorage?: boolean }): Promise<void>;
 }
