@@ -17,6 +17,20 @@ export interface GameEventMap {
     readonly survivalTimeMs: number;
     readonly killsByEnemyId: Readonly<Record<string, number>>;
   };
+  'stage:loading': {
+    readonly stageId: string;
+    readonly stageIndex: number;
+    readonly completedLoops: number;
+  };
+  'stage:started': {
+    readonly stageId: string;
+    readonly stageIndex: number;
+    readonly completedLoops: number;
+  };
+  'stage:timer-changed': { readonly remainingMs: number };
+  'stage:pressure-changed': { readonly step: number };
+  'boss:spawned': { readonly bossId: string; readonly safeUntilMs: number };
+  'boss:phase-changed': { readonly bossId: string; readonly phase: 2 };
   'player:aim-changed': { readonly direction: AimDirection; readonly angleDeg: number };
   'player:health-changed': {
     readonly current: number;
@@ -66,11 +80,25 @@ export interface GameEventMap {
     readonly scoreAwarded: number;
     readonly xpGemValue: number;
   };
+  'enemy:spawned': {
+    readonly entityId: string;
+    readonly enemyId: string;
+    readonly elite: boolean;
+    readonly x: number;
+    readonly y: number;
+  };
   'score:changed': { readonly score: number; readonly delta: number; readonly sourceId: string };
   'boss:defeated': {
     readonly bossId: string;
     readonly stageId: string;
     readonly scoreAwarded: number;
+  };
+  'stage:completed': {
+    readonly stageId: string;
+    readonly elapsedMs: number;
+    readonly kills: number;
+    readonly damageTaken: number;
+    readonly scoreEarned: number;
   };
   'game:pause-changed': { readonly paused: boolean; readonly reason: 'user' | 'blur' };
 }

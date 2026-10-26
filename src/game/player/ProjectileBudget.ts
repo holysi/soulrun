@@ -24,6 +24,10 @@ export class ProjectileBudget {
     return expired;
   }
 
+  release(id: string): void {
+    this.expiresAtById.delete(id);
+  }
+
   clear(): void {
     this.expiresAtById.clear();
   }
