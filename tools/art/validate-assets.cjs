@@ -120,9 +120,16 @@ async function rawFrame(file, asset, frameIndex) {
 async function validateDirectionalSemantics(file, asset) {
   const columns = asset.width / asset.frameWidth;
   if (
-    !['player-soul-guide', 'enemy-zombie', 'enemy-bat', 'boss-graveyard-guardian'].includes(
-      asset.key,
-    )
+    ![
+      'player-soul-guide',
+      'enemy-zombie',
+      'enemy-bat',
+      'boss-graveyard-guardian',
+      'enemy-skeleton-archer',
+      'enemy-splitting-slime',
+      'enemy-small-slime',
+      'boss-skeleton-warden',
+    ].includes(asset.key)
   )
     return;
   for (let row = 0; row < 8; row += 1) {
@@ -230,22 +237,50 @@ async function main() {
   expect(new Set(keys).size === keys.length, 'duplicate image key');
   const palettes = new Set(paletteIds);
   for (const asset of manifest.images) await validateImage(asset, palettes);
-  const tile = manifest.images.find((asset) => asset.key === 'tileset-cemetery');
-  const { data } = await sharp(path.join(root, tile.path))
-    .extract({ left: 0, top: 0, width: 16, height: 16 })
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  for (const tileKey of ['tileset-cemetery', 'tileset-dungeon']) {
+    const tile = manifest.images.find((asset) => asset.key === tileKey);
+    expect(tile, `missing ${tileKey}`);
+    const { data } = await sharp(path.join(root, tile.path))
+      .extract({ left: 0, top: 0, width: 16, height: 16 })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    expect(
+      data.every((value, index) => index % 4 !== 3 || value === 0),
+      `${tileKey}: tile 0 is not empty`,
+    );
+  }
+  const dungeonMapEntry = manifest.maps.find((entry) => entry.key === 'map-dungeon');
+  expect(dungeonMapEntry, 'missing map-dungeon manifest entry');
+  expect(exactCaseExists(dungeonMapEntry.path), 'missing or case-mismatched map-dungeon file');
+  const dungeonMap = JSON.parse(fs.readFileSync(path.join(root, dungeonMapEntry.path), 'utf8'));
+  expect(dungeonMap.width === 120 && dungeonMap.height === 67, 'map-dungeon: invalid bounds');
   expect(
-    data.every((value, index) => index % 4 !== 3 || value === 0),
-    'tileset-cemetery: tile 0 is not empty',
+    dungeonMap.width * dungeonMap.tilewidth === 1920 &&
+      dungeonMap.height * dungeonMap.tileheight === 1072,
+    'map-dungeon: dimensions do not match world bounds',
   );
+  const mapLayers = new Map(dungeonMap.layers.map((layer) => [layer.name, layer]));
+  for (const layer of dungeonMapEntry.layers) {
+    expect(mapLayers.has(layer.name), `map-dungeon: missing ${layer.name} layer`);
+  }
+  expect(
+    mapLayers.get('ground').data.length === dungeonMap.width * dungeonMap.height,
+    'map-dungeon: incomplete ground grid',
+  );
+  expect(mapLayers.get('obstacles').objects.length > 4, 'map-dungeon: obstacles are incomplete');
   for (const preview of [
     'player-soul-guide-contact-sheet.png',
     'enemy-zombie-contact-sheet.png',
     'enemy-bat-contact-sheet.png',
     'boss-graveyard-guardian-contact-sheet.png',
     'cemetery-vertical-slice-contact-sheet.png',
+    'enemy-skeleton-archer-contact-sheet.png',
+    'enemy-splitting-slime-contact-sheet.png',
+    'enemy-small-slime-contact-sheet.png',
+    'boss-skeleton-warden-contact-sheet.png',
+    'dungeon-vertical-slice-contact-sheet.png',
+    'map-dungeon-preview.png',
   ]) {
     expect(exactCaseExists(`docs/art/previews/${preview}`), `missing preview ${preview}`);
   }
