@@ -876,6 +876,10 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.collectNearbyXpGems();
+    if (this.simulationSuspended()) {
+      this.reflectState();
+      return;
+    }
     this.collectNearbyHealing();
     this.updateAnimation();
     this.updateSecondaryWeapons(delta);
