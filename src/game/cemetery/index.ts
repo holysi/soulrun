@@ -4,3 +4,5 @@ export type {
   CemeteryDirectorEvent,
   CemeteryEnemyState,
 } from './CemeteryDirector';
+export { circleContains, consumePenetratingHit } from './combat';
+export type { PenetrationResult, PenetrationState } from './combat';

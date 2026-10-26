@@ -45,12 +45,14 @@ export class CemeteryDirector {
   ) as BossConfig & { readonly id: 'graveyard-guardian' };
   private readonly scheduler: WaveScheduler;
   private readonly spawnRandom;
+  private readonly completedLoops: number;
   private readonly capEscalation = new CapEscalation(this.stage.capEscalation);
   private readonly enemies = new Map<string, CemeteryEnemyState>();
   private entityCounter = 0;
   private bossValue: CemeteryBossState | null = null;
 
   constructor(seed: string, completedLoops = 0) {
+    this.completedLoops = completedLoops;
     this.scheduler = new WaveScheduler(this.stage, completedLoops);
     this.spawnRandom = createGameplayStreams(seed).spawn;
   }
@@ -92,12 +94,14 @@ export class CemeteryDirector {
         offscreenSpawnMargin: GAME_CONFIG.world.offscreenSpawnMargin,
         random: this.spawnRandom,
       });
+      const previousStacks = this.capEscalation.stacks;
       this.capEscalation.recordBatch(scheduled.count, planned.requests.length);
+      if (this.capEscalation.stacks !== previousStacks) this.rescaleActiveEnemies();
       for (const request of planned.requests) {
         const config = GAME_CONFIG.enemies.find((candidate) => candidate.id === request.enemyId)!;
         const stats = scaleEnemyStats(
           config,
-          0,
+          this.completedLoops,
           request.elite,
           this.capEscalation.stacks,
           this.stage.capEscalation,
@@ -156,17 +160,37 @@ export class CemeteryDirector {
       index += 1
     ) {
       const angle = (index / count) * Math.PI * 2;
+      const stats = scaleEnemyStats(
+        config,
+        this.completedLoops,
+        false,
+        this.capEscalation.stacks,
+        this.stage.capEscalation,
+        GAME_CONFIG.progression,
+      );
       const enemy: CemeteryEnemyState = {
         entityId: `enemy:${++this.entityCounter}`,
         enemyId,
         elite: false,
-        x: center.x + Math.cos(angle) * radius,
-        y: center.y + Math.sin(angle) * radius,
-        maxHealth: config.health,
-        health: config.health,
-        damage: config.contactDamage,
-        moveSpeed: config.moveSpeed,
-        radius: config.radius,
+        x: Math.max(
+          this.stage.bounds.x,
+          Math.min(
+            this.stage.bounds.x + this.stage.bounds.width,
+            center.x + Math.cos(angle) * radius,
+          ),
+        ),
+        y: Math.max(
+          this.stage.bounds.y,
+          Math.min(
+            this.stage.bounds.y + this.stage.bounds.height,
+            center.y + Math.sin(angle) * radius,
+          ),
+        ),
+        maxHealth: stats.maximumHealth,
+        health: stats.maximumHealth,
+        damage: stats.damage,
+        moveSpeed: stats.moveSpeed,
+        radius: stats.radius,
         spawnedAtMs: stageTimeMs,
       };
       this.enemies.set(enemy.entityId, enemy);
@@ -211,5 +235,28 @@ export class CemeteryDirector {
       spawnedAtMs: stageTimeMs,
     };
     return { kind: 'boss-spawned', boss: this.bossValue };
+  }
+
+  private rescaleActiveEnemies(): void {
+    for (const [entityId, enemy] of this.enemies) {
+      const config = GAME_CONFIG.enemies.find((candidate) => candidate.id === enemy.enemyId)!;
+      const stats = scaleEnemyStats(
+        config,
+        this.completedLoops,
+        enemy.elite,
+        this.capEscalation.stacks,
+        this.stage.capEscalation,
+        GAME_CONFIG.progression,
+      );
+      const maximumHealthDelta = Math.max(0, stats.maximumHealth - enemy.maxHealth);
+      this.enemies.set(entityId, {
+        ...enemy,
+        maxHealth: stats.maximumHealth,
+        health: enemy.health + maximumHealthDelta,
+        damage: stats.damage,
+        moveSpeed: stats.moveSpeed,
+        radius: stats.radius,
+      });
+    }
   }
 }

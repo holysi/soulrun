@@ -48,4 +48,25 @@ describe('cemetery director', () => {
     expect(director.activeEnemies).toHaveLength(0);
     expect(director.summon('zombie', 4, player, 110, 1000)).toHaveLength(4);
   });
+
+  it('rescales every live enemy after a capped batch and scales later summons', () => {
+    const director = new CemeteryDirector('cap-seed');
+    director.summon('zombie', GAME_CONFIG.world.maxEnemies, player, 110, 0);
+    const before = director.activeEnemies[0];
+    if (!before) throw new Error('Expected a capped battlefield');
+
+    director.drainThrough(5000, player, camera);
+    const after = director.activeEnemies.find((enemy) => enemy.entityId === before.entityId);
+    expect(director.pressureStacks).toBeGreaterThan(0);
+    expect(after?.maxHealth).toBeGreaterThan(before.maxHealth);
+    expect(after?.health).toBe((before.health ?? 0) + ((after?.maxHealth ?? 0) - before.maxHealth));
+    expect(after?.damage).toBeGreaterThan(before.damage);
+
+    director.clearEnemies();
+    director.summon('zombie', 1, player, 110, 2000);
+    expect(director.activeEnemies[0]).toMatchObject({
+      maxHealth: after?.maxHealth,
+      damage: after?.damage,
+    });
+  });
 });

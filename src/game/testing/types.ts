@@ -2,9 +2,11 @@ export type AimDirection = 'e' | 'se' | 's' | 'sw' | 'w' | 'nw' | 'n' | 'ne';
 export type TestInputCommand = 'up' | 'down' | 'left' | 'right' | 'pause' | 'confirm';
 export type TestRuntimeState =
   | 'idle'
+  | 'loading-stage'
   | 'playing'
   | 'boss-fight'
   | 'boss-cleanup'
+  | 'stage-summary'
   | 'level-up'
   | 'upgrade-choice'
   | 'paused'

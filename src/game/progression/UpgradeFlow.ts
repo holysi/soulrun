@@ -1,4 +1,5 @@
-export type ProgressionBaseState = 'playing' | 'boss-fight' | 'boss-cleanup';
+export type ProgressionBaseState =
+  'loading-stage' | 'playing' | 'boss-fight' | 'boss-cleanup' | 'stage-summary';
 export type ProgressionModalState = 'level-up' | 'upgrade-choice';
 export type ProgressionFlowState = ProgressionBaseState | ProgressionModalState;
 

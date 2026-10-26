@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 import { imageAsset } from '../assets';
-import { CemeteryDirector } from '../cemetery';
+import { CemeteryDirector, circleContains, consumePenetratingHit } from '../cemetery';
 import type { CemeteryDirectorEvent, CemeteryEnemyState } from '../cemetery';
 import { HEAL_PICKUP_AMOUNT, SCENE_KEYS } from '../constants';
 import { BossAttackTimeline, GAME_CONFIG, bossAttackCooldown } from '../content';
@@ -121,6 +121,12 @@ export class GameScene extends Phaser.Scene {
   private lastTimerSecond = -1;
   private lastPressureStep = -1;
   private readonly bossDamageMoments = new Set<number>();
+  private readonly bladeContacts = new Map<number, Set<string>>();
+  private guardianContactAt = 0;
+  private guardianContactHitCount = 0;
+  private secondaryHitCount = 0;
+  private readonly secondaryHits = new Map<string, number>();
+  private penetrationUsedCount = 0;
 
   constructor() {
     super(SCENE_KEYS.game);
@@ -216,6 +222,12 @@ export class GameScene extends Phaser.Scene {
     this.lastTimerSecond = -1;
     this.lastPressureStep = -1;
     this.bossDamageMoments.clear();
+    this.bladeContacts.clear();
+    this.guardianContactAt = 0;
+    this.guardianContactHitCount = 0;
+    this.secondaryHitCount = 0;
+    this.secondaryHits.clear();
+    this.penetrationUsedCount = 0;
     this.eventsOut = new GameEventPublisher(
       this.registry.events,
       'adventure-local-1',
@@ -474,12 +486,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   damagePlayer(amount: number, sourceId = 'contact'): boolean {
-    if (this.paused || this.model.dead || this.upgradeFlow.modalActive) return false;
+    if (
+      this.paused ||
+      this.model.dead ||
+      this.upgradeFlow.modalActive ||
+      !['playing', 'boss-fight'].includes(this.upgradeFlow.baseState)
+    )
+      return false;
     return this.applyDamage(amount, sourceId);
   }
 
   damagePlayerFromBoss(amount: number, bossId: string): boolean {
-    if (this.paused || this.model.dead || this.upgradeFlow.modalActive) return false;
+    if (
+      this.paused ||
+      this.model.dead ||
+      this.upgradeFlow.modalActive ||
+      this.upgradeFlow.baseState !== 'boss-fight'
+    )
+      return false;
     if (!this.bossSafety.canDamagePlayer(this.simulationTimeMs)) return false;
     return this.applyDamage(amount, `boss:${bossId}`);
   }
@@ -692,7 +716,11 @@ export class GameScene extends Phaser.Scene {
       arrow
         .setDepth(2)
         .setRotation(angle)
-        .setData({ damage: stats.damage, penetration: stats.penetration ?? 0 });
+        .setData({
+          damage: stats.damage,
+          penetration: stats.penetration ?? 0,
+          hitIds: new Set<string>(),
+        });
       arrow.setVelocity(
         aim.x * GHOST_ARROW_CONFIG.projectileSpeed,
         aim.y * GHOST_ARROW_CONFIG.projectileSpeed,
@@ -738,10 +766,25 @@ export class GameScene extends Phaser.Scene {
     mount.dataset.ghostArrowCount = String(this.attackId);
     mount.dataset.soulBladeCount = String(this.soulBlades.length);
     mount.dataset.deathAuraCount = String(this.secondaryAttackId);
+    mount.dataset.secondaryHitCount = String(this.secondaryHitCount);
+    mount.dataset.guardianContactHitCount = String(this.guardianContactHitCount);
+    mount.dataset.penetrationUsedCount = String(this.penetrationUsedCount);
+    for (const key of [
+      'soul-blade:enemy',
+      'soul-blade:boss',
+      'death-aura:enemy',
+      'death-aura:boss',
+    ]) {
+      mount.dataset[
+        `hits${key.replace(/(^|-|:)([a-z])/g, (_, _separator, letter: string) => letter.toUpperCase())}`
+      ] = String(this.secondaryHits.get(key) ?? 0);
+    }
     mount.dataset.activeProjectileCount = String(this.projectileBudget.activeCount);
     mount.dataset.stageId = this.stageId;
     mount.dataset.stageTimeMs = this.simulationTimeMs.toFixed(0);
     mount.dataset.enemyCount = String(this.cemetery.activeEnemies.length);
+    mount.dataset.xpGemCount = String(this.xpGems.size);
+    mount.dataset.healPickupCount = String(this.healPickups.size);
     mount.dataset.bossPhase = String(this.cemetery.boss?.phase ?? 0);
     mount.dataset.stageCompleted = String(this.stageCompleted);
     mount.dataset.musicCue = this.cemetery.boss?.health
@@ -790,12 +833,12 @@ export class GameScene extends Phaser.Scene {
       optionId,
       newLevel: applied.newLevel,
     });
-    this.syncSecondaryWeapons();
+    if (['playing', 'boss-fight'].includes(this.upgradeFlow.baseState)) this.syncSecondaryWeapons();
     const nextOffer = this.progression.offerNextQueuedLevel();
     this.upgradeFlow.finishOffer(nextOffer !== null);
     if (nextOffer) this.publishOffer(nextOffer);
-    else if (this.upgradeFlow.baseState === 'boss-cleanup' && offerSource === 'level')
-      this.openBossUpgradeAfterCleanup();
+    else if (offerSource === 'boss') this.handoffToNextStage();
+    else if (this.upgradeFlow.baseState === 'boss-cleanup') this.showStageSummaryAndBossUpgrade();
     this.syncPhysicsPause();
     this.reflectState();
   }
@@ -828,6 +871,10 @@ export class GameScene extends Phaser.Scene {
     this.updateEnemies(delta);
     this.updateGuardian(delta);
     this.resolveProjectileHits();
+    if (this.simulationSuspended()) {
+      this.reflectState();
+      return;
+    }
     this.collectNearbyXpGems();
     this.collectNearbyHealing();
     this.updateAnimation();
@@ -841,7 +888,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateStageDirector(): void {
-    if (this.stageCompleted || this.upgradeFlow.baseState !== 'playing') return;
+    if (this.stageCompleted || !['playing', 'boss-fight'].includes(this.upgradeFlow.baseState))
+      return;
     const camera = this.cameras.main.worldView;
     for (const event of this.cemetery.drainThrough(this.simulationTimeMs, this.player, {
       x: camera.x,
@@ -956,10 +1004,13 @@ export class GameScene extends Phaser.Scene {
 
   private resolveProjectileHits(): void {
     for (const [projectileId, arrow] of [...this.arrows]) {
-      let hit = false;
+      let hitIds = (arrow.getData('hitIds') as Set<string> | undefined) ?? new Set<string>();
+      let remainingPenetration = Number(arrow.getData('penetration')) || 0;
+      let shouldRelease = false;
       for (const enemy of this.cemetery.activeEnemies) {
         const sprite = this.enemySprites.get(enemy.entityId);
         if (
+          hitIds.has(enemy.entityId) ||
           !sprite ||
           Phaser.Math.Distance.Between(arrow.x, arrow.y, sprite.x, sprite.y) > enemy.radius + 8
         )
@@ -967,10 +1018,15 @@ export class GameScene extends Phaser.Scene {
         const damage = Number(arrow.getData('damage')) || 0;
         for (const event of this.cemetery.damageEnemy(enemy.entityId, damage))
           this.handleCemeteryEvent(event);
-        hit = true;
-        break;
+        const penetration = consumePenetratingHit({ hitIds, remainingPenetration }, enemy.entityId);
+        if (penetration.remainingPenetration < remainingPenetration) this.penetrationUsedCount += 1;
+        hitIds = new Set(penetration.hitIds);
+        remainingPenetration = penetration.remainingPenetration;
+        shouldRelease = penetration.release;
+        if (shouldRelease) break;
       }
-      if (!hit && this.guardian && this.cemetery.boss?.health) {
+      const bossHitId = `boss:${GUARDIAN_CONFIG.id}`;
+      if (!shouldRelease && !hitIds.has(bossHitId) && this.guardian && this.cemetery.boss?.health) {
         if (
           Phaser.Math.Distance.Between(arrow.x, arrow.y, this.guardian.x, this.guardian.y) <=
           GUARDIAN_CONFIG.radius + 9
@@ -978,10 +1034,17 @@ export class GameScene extends Phaser.Scene {
           const damage = Number(arrow.getData('damage')) || 0;
           for (const event of this.cemetery.damageBoss(damage)) this.handleCemeteryEvent(event);
           this.syncBossSnapshot();
-          hit = true;
+          if (this.stageCompleted) return;
+          const penetration = consumePenetratingHit({ hitIds, remainingPenetration }, bossHitId);
+          if (penetration.remainingPenetration < remainingPenetration)
+            this.penetrationUsedCount += 1;
+          hitIds = new Set(penetration.hitIds);
+          remainingPenetration = penetration.remainingPenetration;
+          shouldRelease = penetration.release;
         }
       }
-      if (hit) {
+      arrow.setData('hitIds', hitIds).setData('penetration', remainingPenetration);
+      if (shouldRelease) {
         arrow.destroy();
         this.arrows.delete(projectileId);
         this.projectileBudget.release(projectileId);
@@ -1087,12 +1150,27 @@ export class GameScene extends Phaser.Scene {
       this.player.x,
       this.player.y,
     );
-    if (state !== 'telegraph' && distance > 58) {
+    if (state !== 'telegraph' && distance > GUARDIAN_CONFIG.radius + 7) {
       const step = Math.min(distance, GUARDIAN_CONFIG.moveSpeed * (delta / 1000));
       this.guardian.setPosition(
         this.guardian.x + ((this.player.x - this.guardian.x) / distance) * step,
         this.guardian.y + ((this.player.y - this.guardian.y) / distance) * step,
       );
+    }
+    const contactDistance = Phaser.Math.Distance.Between(
+      this.guardian.x,
+      this.guardian.y,
+      this.player.x,
+      this.player.y,
+    );
+    if (
+      contactDistance <= GUARDIAN_CONFIG.radius + 8 &&
+      this.simulationTimeMs >= this.guardianContactAt
+    ) {
+      if (this.damagePlayerFromBoss(GUARDIAN_CONFIG.contactDamage, GUARDIAN_CONFIG.id)) {
+        this.guardianContactHitCount += 1;
+        this.guardianContactAt = this.simulationTimeMs + GAME_CONFIG.player.contactDamageCooldownMs;
+      }
     }
     for (const moment of timeline.damageMomentsBetween(
       this.guardianPreviousAttackMs,
@@ -1127,14 +1205,7 @@ export class GameScene extends Phaser.Scene {
   private guardianAttackHitsPlayer(attack: BossAttack): boolean {
     if (!this.guardian) return false;
     if (attack.kind === 'slam') {
-      return (
-        Phaser.Math.Distance.Between(
-          this.guardian.x,
-          this.guardian.y,
-          this.player.x,
-          this.player.y,
-        ) <= attack.radius
-      );
+      return circleContains(this.guardianTarget, this.player, attack.radius);
     }
     if (attack.kind === 'line') {
       const angle = Phaser.Math.Angle.Between(
@@ -1164,22 +1235,48 @@ export class GameScene extends Phaser.Scene {
     if (this.stageCompleted) return;
     this.stageCompleted = true;
     this.syncBossSnapshot();
-    this.awardBossDefeat(GUARDIAN_CONFIG.id);
     this.beginBossCleanup();
-    this.telegraph?.destroy();
-    this.telegraph = null;
-    this.guardian?.destroy();
-    this.guardian = null;
-    for (const enemy of this.cemetery.clearEnemies()) {
-      this.enemySprites.get(enemy.entityId)?.destroy();
-      this.enemySprites.delete(enemy.entityId);
-    }
+    this.awardBossDefeat(GUARDIAN_CONFIG.id);
     for (const entityId of [...this.xpGems.keys()].sort((left, right) =>
       left.localeCompare(right, undefined, { numeric: true }),
     )) {
       this.collectXpGem(entityId);
     }
-    this.healPlayer(this.model.maxHealth * 0.3);
+    this.clearBattlefield();
+    const next = this.progression.offerNextQueuedLevel();
+    if (next) {
+      this.upgradeFlow.openLevelUp();
+      this.publishOffer(next);
+    } else this.showStageSummaryAndBossUpgrade();
+    this.syncPhysicsPause();
+    this.reflectState();
+  }
+
+  private clearBattlefield(): void {
+    this.telegraph?.destroy();
+    this.telegraph = null;
+    this.guardian?.destroy();
+    this.guardian = null;
+    this.guardianTimeline = null;
+    for (const enemy of this.cemetery.clearEnemies()) {
+      this.enemySprites.get(enemy.entityId)?.destroy();
+    }
+    this.enemySprites.clear();
+    this.enemyContactAt.clear();
+    for (const arrow of this.arrows.values()) arrow.destroy();
+    this.arrows.clear();
+    this.projectileBudget.clear();
+    for (const pickup of this.healPickups.values()) pickup.destroy();
+    this.healPickups.clear();
+    this.soulBlades.splice(0).forEach((blade) => blade.destroy());
+    this.bladeContacts.clear();
+    this.tweens.killTweensOf(this.deathAura);
+    this.deathAura.setVisible(false);
+    this.bossDamageMoments.clear();
+  }
+
+  private showStageSummaryAndBossUpgrade(): void {
+    this.upgradeFlow.enterBaseState('stage-summary');
     this.eventsOut.emit('stage:completed', {
       stageId: CEMETERY_STAGE.id,
       elapsedMs: this.simulationTimeMs,
@@ -1187,19 +1284,16 @@ export class GameScene extends Phaser.Scene {
       damageTaken: this.damageTaken,
       scoreEarned: this.score.score,
     });
-    const next = this.progression.offerNextQueuedLevel();
-    if (next) {
-      this.upgradeFlow.openLevelUp();
-      this.publishOffer(next);
-    } else this.openBossUpgradeAfterCleanup();
-    this.syncPhysicsPause();
-    this.reflectState();
-  }
-
-  private openBossUpgradeAfterCleanup(): void {
+    this.healPlayer(this.model.maxHealth * GAME_CONFIG.player.postBossHealRatio);
     const offer = this.progression.offerBossUpgrade();
     this.upgradeFlow.openBossUpgrade();
     this.publishOffer(offer);
+  }
+
+  private handoffToNextStage(): void {
+    this.upgradeFlow.enterBaseState('loading-stage');
+    this.stageId = 'dungeon';
+    this.eventsOut.emit('stage:loading', { stageId: 'dungeon', stageIndex: 1, completedLoops: 0 });
   }
 
   private collectNearbyXpGems(): void {
@@ -1227,7 +1321,7 @@ export class GameScene extends Phaser.Scene {
       testControlled: this.testControlled,
       userPaused: this.paused,
       modalActive: this.upgradeFlow.modalActive,
-      simulationSuspended: this.upgradeFlow.baseState === 'boss-cleanup',
+      simulationSuspended: !['playing', 'boss-fight'].includes(this.upgradeFlow.baseState),
       playerDead: this.model.dead,
     });
   }
@@ -1237,11 +1331,12 @@ export class GameScene extends Phaser.Scene {
       this.paused ||
       this.model.dead ||
       this.upgradeFlow.modalActive ||
-      this.upgradeFlow.baseState === 'boss-cleanup'
+      !['playing', 'boss-fight'].includes(this.upgradeFlow.baseState)
     );
   }
 
   private syncSecondaryWeapons(): void {
+    this.bladeContacts.clear();
     const progression = this.progression.snapshot();
     const bladeLevel = progression.weaponLevels['soul-blade'] ?? 0;
     const desired =
@@ -1285,8 +1380,10 @@ export class GameScene extends Phaser.Scene {
           )
           .setRotation(angle)
           .setData('damage', stats.damage);
+        this.resolveSoulBladeHits(index, blade, stats.damage);
       });
     }
+    if (this.stageCompleted) return;
     const auraLevel = progression.weaponLevels['death-aura'] ?? 0;
     if (auraLevel === 0 || this.simulationTimeMs < this.nextAuraAtMs) return;
     const stats = effectiveWeaponStats(
@@ -1317,6 +1414,76 @@ export class GameScene extends Phaser.Scene {
       origin: { x: this.player.x, y: this.player.y },
       aim: { x: 0, y: 0 },
     });
+    this.damageTargetsInRadius(this.player.x, this.player.y, radius, stats.damage);
+  }
+
+  private resolveSoulBladeHits(
+    bladeIndex: number,
+    blade: Phaser.GameObjects.Image,
+    damage: number,
+  ): void {
+    const previous = this.bladeContacts.get(bladeIndex) ?? new Set<string>();
+    const current = new Set<string>();
+    for (const enemy of this.cemetery.activeEnemies) {
+      const sprite = this.enemySprites.get(enemy.entityId);
+      if (
+        !sprite ||
+        Phaser.Math.Distance.Between(blade.x, blade.y, sprite.x, sprite.y) > enemy.radius + 6
+      )
+        continue;
+      current.add(enemy.entityId);
+      if (!previous.has(enemy.entityId))
+        this.damageEnemyWithSecondary(enemy.entityId, damage, 'soul-blade');
+    }
+    const bossId = `boss:${GUARDIAN_CONFIG.id}`;
+    if (
+      this.guardian &&
+      this.cemetery.boss?.health &&
+      Phaser.Math.Distance.Between(blade.x, blade.y, this.guardian.x, this.guardian.y) <=
+        GUARDIAN_CONFIG.radius + 6
+    ) {
+      current.add(bossId);
+      if (!previous.has(bossId)) this.damageBossWithSecondary(damage, 'soul-blade');
+    }
+    if (this.stageCompleted) return;
+    this.bladeContacts.set(bladeIndex, current);
+  }
+
+  private damageTargetsInRadius(x: number, y: number, radius: number, damage: number): void {
+    for (const enemy of this.cemetery.activeEnemies) {
+      const sprite = this.enemySprites.get(enemy.entityId);
+      if (!sprite || Phaser.Math.Distance.Between(x, y, sprite.x, sprite.y) > radius + enemy.radius)
+        continue;
+      this.damageEnemyWithSecondary(enemy.entityId, damage, 'death-aura');
+    }
+    if (
+      this.guardian &&
+      this.cemetery.boss?.health &&
+      Phaser.Math.Distance.Between(x, y, this.guardian.x, this.guardian.y) <=
+        radius + GUARDIAN_CONFIG.radius
+    ) {
+      this.damageBossWithSecondary(damage, 'death-aura');
+    }
+  }
+
+  private damageEnemyWithSecondary(
+    entityId: string,
+    damage: number,
+    weaponId: 'soul-blade' | 'death-aura',
+  ): void {
+    this.secondaryHitCount += 1;
+    const key = `${weaponId}:enemy`;
+    this.secondaryHits.set(key, (this.secondaryHits.get(key) ?? 0) + 1);
+    for (const event of this.cemetery.damageEnemy(entityId, damage))
+      this.handleCemeteryEvent(event);
+  }
+
+  private damageBossWithSecondary(damage: number, weaponId: 'soul-blade' | 'death-aura'): void {
+    this.secondaryHitCount += 1;
+    const key = `${weaponId}:boss`;
+    this.secondaryHits.set(key, (this.secondaryHits.get(key) ?? 0) + 1);
+    for (const event of this.cemetery.damageBoss(damage)) this.handleCemeteryEvent(event);
+    this.syncBossSnapshot();
   }
 
   private createAnimations(): void {
