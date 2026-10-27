@@ -4,8 +4,16 @@ import type { EnemyConfig, ProgressionConfig, StageConfig } from './types';
 export interface ScaledEnemyStats {
   readonly maximumHealth: number;
   readonly damage: number;
+  readonly attackDamageMultiplier: number;
   readonly moveSpeed: number;
   readonly radius: number;
+}
+
+export function scaleEnemyAttackDamage(baseDamage: number, attackDamageMultiplier: number): number {
+  if (baseDamage < 0 || attackDamageMultiplier < 0) {
+    throw new Error('Enemy attack damage inputs must be non-negative');
+  }
+  return roundHalfUp(baseDamage * attackDamageMultiplier);
 }
 
 export function scaleEnemyStats(
@@ -28,11 +36,13 @@ export function scaleEnemyStats(
   const eliteDamage = elite ? progression.eliteDamageMultiplier : 1;
   const eliteScale = elite ? progression.eliteScaleMultiplier : 1;
   const health = enemy.health * (1 + 0.35 * completedLoops) * eliteHealth;
-  const damage = enemy.contactDamage * (1 + 0.2 * completedLoops) * eliteDamage;
+  const attackDamageMultiplier =
+    (1 + 0.2 * completedLoops) * eliteDamage * (1 + cap.damagePerStack * capStacks);
 
   return {
     maximumHealth: roundHalfUp(health * (1 + cap.healthPerStack * capStacks)),
-    damage: roundHalfUp(damage * (1 + cap.damagePerStack * capStacks)),
+    damage: scaleEnemyAttackDamage(enemy.contactDamage, attackDamageMultiplier),
+    attackDamageMultiplier,
     moveSpeed: Math.min(enemy.moveSpeed * (1 + 0.03 * completedLoops), enemy.moveSpeed * 1.25),
     radius: enemy.radius * eliteScale,
   };

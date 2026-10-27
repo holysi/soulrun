@@ -18,6 +18,7 @@ export interface StageEnemyState {
   readonly maxHealth: number;
   readonly health: number;
   readonly damage: number;
+  readonly attackDamageMultiplier: number;
   readonly moveSpeed: number;
   readonly radius: number;
   readonly spawnedAtMs: number;
@@ -52,6 +53,7 @@ export class StageDirector {
     readonly stageId: StageConfig['id'],
     seed: string,
     private readonly completedLoops = 0,
+    private readonly spawnExclusionRects: readonly Rect[] = [],
   ) {
     const stage = GAME_CONFIG.stages.find((candidate) => candidate.id === stageId);
     if (!stage) throw new Error(`Unknown stage ${stageId}`);
@@ -100,6 +102,8 @@ export class StageDirector {
         safeSpawnRadius: GAME_CONFIG.world.safeSpawnRadius,
         offscreenSpawnMargin: GAME_CONFIG.world.offscreenSpawnMargin,
         random: this.spawnRandom,
+        excludedRects: this.spawnExclusionRects,
+        collisionPadding: this.maximumSpawnRadius(scheduled.kind === 'elite'),
       });
       const previousStacks = this.capEscalation.stacks;
       this.capEscalation.recordBatch(scheduled.count, planned.requests.length);
@@ -224,6 +228,7 @@ export class StageDirector {
       maxHealth: stats.maximumHealth,
       health: stats.maximumHealth,
       damage: stats.damage,
+      attackDamageMultiplier: stats.attackDamageMultiplier,
       moveSpeed: stats.moveSpeed,
       radius: stats.radius,
       spawnedAtMs: stageTimeMs,
@@ -260,10 +265,24 @@ export class StageDirector {
         maxHealth: stats.maximumHealth,
         health: enemy.health + maximumHealthDelta,
         damage: stats.damage,
+        attackDamageMultiplier: stats.attackDamageMultiplier,
         moveSpeed: stats.moveSpeed,
         radius: stats.radius,
       });
     }
+  }
+
+  private maximumSpawnRadius(elite: boolean): number {
+    const pool = elite ? this.stage.eliteEnemyPool : this.stage.enemyPool;
+    const scale = elite ? GAME_CONFIG.progression.eliteScaleMultiplier : 1;
+    return Math.max(
+      0,
+      ...pool.map((entry) => {
+        const config = GAME_CONFIG.enemies.find((candidate) => candidate.id === entry.id);
+        if (!config) throw new Error(`Unknown enemy ${entry.id}`);
+        return config.radius * scale;
+      }),
+    );
   }
 }
 
