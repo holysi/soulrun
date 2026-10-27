@@ -6,7 +6,7 @@ import {
   planSpawnBatch,
   scaleEnemyStats,
 } from '../content';
-import type { BossConfig, EnemyConfig, Rect, StageConfig } from '../content';
+import type { BossConfig, EnemyConfig, Point, Rect, StageConfig } from '../content';
 import { createGameplayStreams } from '../random/RandomSource';
 
 export interface StageEnemyState {
@@ -153,22 +153,19 @@ export class StageDirector {
       index += 1
     ) {
       const angle = (index / count) * Math.PI * 2;
+      const candidate = {
+        x: clamp(center.x + Math.cos(angle) * radius, this.stage.bounds.x, this.stage.bounds.width),
+        y: clamp(
+          center.y + Math.sin(angle) * radius,
+          this.stage.bounds.y,
+          this.stage.bounds.height,
+        ),
+      };
       events.push(
         this.spawnEnemy(
           enemyId,
           false,
-          {
-            x: clamp(
-              center.x + Math.cos(angle) * radius,
-              this.stage.bounds.x,
-              this.stage.bounds.width,
-            ),
-            y: clamp(
-              center.y + Math.sin(angle) * radius,
-              this.stage.bounds.y,
-              this.stage.bounds.height,
-            ),
-          },
+          this.findLegalSummonPosition(enemyId, candidate, center),
           stageTimeMs,
         ),
       );
@@ -282,6 +279,58 @@ export class StageDirector {
         if (!config) throw new Error(`Unknown enemy ${entry.id}`);
         return config.radius * scale;
       }),
+    );
+  }
+
+  private findLegalSummonPosition(
+    enemyId: EnemyConfig['id'],
+    candidate: Point,
+    center: Point,
+  ): Point {
+    const config = GAME_CONFIG.enemies.find((enemy) => enemy.id === enemyId);
+    if (!config) throw new Error(`Unknown enemy ${enemyId}`);
+    const radius = scaleEnemyStats(
+      config,
+      this.completedLoops,
+      false,
+      this.capEscalation.stacks,
+      this.stage.capEscalation,
+      GAME_CONFIG.progression,
+    ).radius;
+    const candidates = [candidate, center];
+    const step = Math.max(8, radius * 2);
+    for (let distance = step; distance <= 256; distance += step) {
+      candidates.push(
+        { x: center.x + distance, y: center.y },
+        { x: center.x - distance, y: center.y },
+        { x: center.x, y: center.y + distance },
+        { x: center.x, y: center.y - distance },
+        { x: center.x + distance, y: center.y + distance },
+        { x: center.x - distance, y: center.y + distance },
+        { x: center.x + distance, y: center.y - distance },
+        { x: center.x - distance, y: center.y - distance },
+      );
+    }
+    const position = candidates.find((point) => this.isClear(point, radius));
+    if (!position) throw new Error(`Unable to place summoned ${enemyId} outside solid geometry`);
+    return position;
+  }
+
+  private isClear(point: Point, radius: number): boolean {
+    const bounds = this.stage.bounds;
+    if (
+      point.x < bounds.x + radius ||
+      point.x > bounds.x + bounds.width - radius ||
+      point.y < bounds.y + radius ||
+      point.y > bounds.y + bounds.height - radius
+    )
+      return false;
+    return !this.spawnExclusionRects.some(
+      (rect) =>
+        point.x >= rect.x - radius &&
+        point.x <= rect.x + rect.width + radius &&
+        point.y >= rect.y - radius &&
+        point.y <= rect.y + rect.height + radius,
     );
   }
 }

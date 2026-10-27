@@ -54,6 +54,17 @@ describe('stage director', () => {
     ).toBe(13);
   });
 
+  it('relocates split children that would otherwise spawn inside a wall', () => {
+    const westWall = { x: 0, y: 0, width: 32, height: 1072 };
+    const director = new StageDirector('dungeon', 'split-wall-seed', 0, [westWall]);
+    const children = director
+      .summon('small-slime', 2, { x: 42, y: 536 }, 18, 1000)
+      .filter((event) => event.kind === 'enemy-spawned')
+      .map((event) => event.enemy);
+    expect(children).toHaveLength(2);
+    expect(children.every((enemy) => enemy.x >= westWall.width + enemy.radius)).toBe(true);
+  });
+
   it('rejects an unknown stage instead of silently falling back', () => {
     expect(() => new StageDirector('crypt' as 'dungeon', 'bad-stage')).toThrow(
       'Unknown stage crypt',
