@@ -1,11 +1,14 @@
 import Phaser from 'phaser';
 
-import dungeonMap from '../../../assets/maps/map-dungeon.json';
-
-import { imageAsset } from '../assets';
+import { imageAsset, mapAsset } from '../assets';
 import { circleContains, consumePenetratingHit } from '../cemetery';
 import { HEAL_PICKUP_AMOUNT, SCENE_KEYS } from '../constants';
-import { BossAttackTimeline, GAME_CONFIG, bossAttackCooldown } from '../content';
+import {
+  BossAttackTimeline,
+  GAME_CONFIG,
+  bossAttackCooldown,
+  scaleEnemyAttackDamage,
+} from '../content';
 import type { BossAttack } from '../content';
 import { GameEventPublisher } from '../events/GameEventBus';
 import { BossSafetyWindow } from '../player/BossSafetyWindow';
@@ -24,7 +27,7 @@ import {
 import type { UpgradeOffer } from '../progression';
 import { createGameplayStreams } from '../random/RandomSource';
 import type { RandomSource } from '../random/RandomSource';
-import { StageDirector } from '../stages';
+import { StageDirector, moveCircleAgainstRectangles } from '../stages';
 import type { StageDirectorEvent, StageEnemyState } from '../stages';
 import type {
   AimDirection,
@@ -54,6 +57,19 @@ function evenlySpacedOffsets(count: number, arcDeg: number): number[] {
 function evenlySpacedRing(count: number): number[] {
   return Array.from({ length: count }, (_, index) => (360 * index) / count);
 }
+
+function stageObstacleRects(stageId: TestSnapshot['stageId']) {
+  if (stageId !== 'dungeon') return [];
+  const stage = GAME_CONFIG.stages.find((candidate) => candidate.id === stageId)!;
+  const layer = mapAsset(stage.mapKey).data.layers.find(
+    (candidate) => candidate.name === stage.obstacleLayer,
+  );
+  return (layer?.objects ?? []).flatMap((object) =>
+    object.width !== undefined && object.height !== undefined
+      ? [{ x: object.x, y: object.y, width: object.width, height: object.height }]
+      : [],
+  );
+}
 const GHOST_ARROW_CONFIG = ghostArrowConfig();
 const ARROW_ASSET_KEY = GHOST_ARROW_CONFIG.assetKey;
 const PLAYER_ASSET = imageAsset(PLAYER_ASSET_KEY);
@@ -75,6 +91,7 @@ const TELEGRAPH_CIRCLE_ASSET = imageAsset('vfx-telegraph-circle');
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
   private obstacles!: Phaser.Physics.Arcade.StaticGroup;
+  private stageMap: Phaser.Tilemaps.Tilemap | null = null;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private movementKeys!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
   private escapeKey!: Phaser.Input.Keyboard.Key;
@@ -181,6 +198,12 @@ export class GameScene extends Phaser.Scene {
       frameHeight: DEATH_AURA_ASSET.frameHeight,
     });
     const stage = GAME_CONFIG.stages.find((candidate) => candidate.id === this.stageId)!;
+    if (stage.id === 'dungeon') {
+      const map = mapAsset(stage.mapKey);
+      const tileset = imageAsset(stage.tilesetKey);
+      this.load.tilemapTiledJSON(map.key, map.path);
+      this.load.image(tileset.key, tileset.path);
+    }
     const enemyIds = new Set([
       ...stage.enemyPool.map((entry) => entry.id),
       ...stage.eliteEnemyPool.map((entry) => entry.id),
@@ -223,6 +246,7 @@ export class GameScene extends Phaser.Scene {
     this.testAim = null;
     this.testRemainderMs = 0;
     this.boss = null;
+    this.stageMap = null;
     this.progression = new ProgressionModel(
       GAME_CONFIG,
       createGameplayStreams(this.seed || 'local-adventure').upgrade,
@@ -235,7 +259,12 @@ export class GameScene extends Phaser.Scene {
     this.nextAuraAtMs = 0;
     this.bladeOrbitAngle = 0;
     this.secondaryAttackId = 0;
-    this.stageDirector = new StageDirector(this.stageId, this.seed || 'local-adventure');
+    this.stageDirector = new StageDirector(
+      this.stageId,
+      this.seed || 'local-adventure',
+      0,
+      stageObstacleRects(this.stageId),
+    );
     this.enemySprites.forEach((sprite) => sprite.destroy());
     this.enemySprites.clear();
     this.enemyContactAt.clear();
@@ -632,10 +661,12 @@ export class GameScene extends Phaser.Scene {
     this.obstacles = this.physics.add.staticGroup();
     const placements =
       this.stageId === 'dungeon'
-        ? dungeonMap.layers
-            .find((layer) => layer.name === this.stageConfig.obstacleLayer)!
-            .objects!.flatMap((object) =>
-              'width' in object && 'height' in object
+        ? (this.stageMap?.getObjectLayer(this.stageConfig.obstacleLayer)?.objects ?? []).flatMap(
+            (object) =>
+              typeof object.x === 'number' &&
+              typeof object.y === 'number' &&
+              typeof object.width === 'number' &&
+              typeof object.height === 'number'
                 ? [
                     [
                       object.x + object.width / 2,
@@ -645,7 +676,7 @@ export class GameScene extends Phaser.Scene {
                     ],
                   ]
                 : [],
-            )
+          )
         : [
             [WORLD_WIDTH / 2 - 128, WORLD_HEIGHT / 2 - 80, 48, 18],
             [WORLD_WIDTH / 2 + 144, WORLD_HEIGHT / 2 + 72, 64, 18],
@@ -661,20 +692,22 @@ export class GameScene extends Phaser.Scene {
 
   private drawWorld(): void {
     this.cameras.main.setBackgroundColor(this.stageId === 'dungeon' ? '#0d1020' : '#0b1113');
-    const grid = this.add.graphics();
-    grid
-      .fillStyle(this.stageId === 'dungeon' ? 0x22263a : 0x18251f, 1)
-      .fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     if (this.stageId === 'dungeon') {
-      grid.fillStyle(0x3c4058, 0.5).fillRect(352, 240, 1216, 560);
-      grid.fillStyle(0x584780, 0.32).fillRect(784, 32, 352, 1008);
-    } else {
-      grid.fillStyle(0x24342a, 1).fillCircle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 105);
+      this.stageMap = this.make.tilemap({ key: this.stageConfig.mapKey });
+      const tileset = this.stageMap.addTilesetImage(
+        this.stageConfig.tilesetKey,
+        this.stageConfig.tilesetKey,
+      );
+      if (!tileset) throw new Error(`Unable to bind tileset ${this.stageConfig.tilesetKey}`);
+      this.stageMap.createLayer('ground', tileset, 0, 0)?.setDepth(-2);
+      this.stageMap.createLayer('decorations', tileset, 0, 0)?.setDepth(-1);
+      return;
     }
-    grid
-      .lineStyle(8, this.stageId === 'dungeon' ? 0x62657a : 0x6a6f65, 1)
-      .strokeRect(4, 4, WORLD_WIDTH - 8, WORLD_HEIGHT - 8);
-    grid.lineStyle(1, this.stageId === 'dungeon' ? 0x3c4058 : 0x33463a, 0.42);
+    const grid = this.add.graphics();
+    grid.fillStyle(0x18251f, 1).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    grid.fillStyle(0x24342a, 1).fillCircle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 105);
+    grid.lineStyle(8, 0x6a6f65, 1).strokeRect(4, 4, WORLD_WIDTH - 8, WORLD_HEIGHT - 8);
+    grid.lineStyle(1, 0x33463a, 0.42);
     for (let x = 0; x <= WORLD_WIDTH; x += 16) grid.lineBetween(x, 0, x, WORLD_HEIGHT);
     for (let y = 0; y <= WORLD_HEIGHT; y += 16) grid.lineBetween(0, y, WORLD_WIDTH, y);
   }
@@ -1040,15 +1073,33 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnEnemySprite(enemy: StageEnemyState): void {
-    const assetKey = GAME_CONFIG.enemies.find(
-      (candidate) => candidate.id === enemy.enemyId,
-    )!.assetKey;
+    const config = GAME_CONFIG.enemies.find((candidate) => candidate.id === enemy.enemyId)!;
+    const asset = imageAsset(config.assetKey);
     const sprite = this.physics.add
-      .sprite(enemy.x, enemy.y, assetKey, 0)
+      .sprite(enemy.x, enemy.y, config.assetKey, 0)
       .setDepth(2)
-      .setScale(enemy.elite ? 1.4 : 1)
+      .setOrigin(asset.anchor.x, asset.anchor.y)
+      .setScale(enemy.elite ? GAME_CONFIG.progression.eliteScaleMultiplier : 1)
       .setTint(enemy.elite ? 0xf6d365 : 0xffffff)
       .setData({ entityId: enemy.entityId, cycleStartedAt: enemy.spawnedAtMs });
+    const body = sprite.body as Phaser.Physics.Arcade.Body;
+    if (asset.collision?.shape === 'circle' && asset.collision.radius !== undefined) {
+      body.setCircle(
+        asset.collision.radius,
+        asset.anchor.x * asset.frameWidth + asset.collision.offsetX - asset.collision.radius,
+        asset.anchor.y * asset.frameHeight + asset.collision.offsetY - asset.collision.radius,
+      );
+    } else if (
+      asset.collision?.shape === 'rect' &&
+      asset.collision.width !== undefined &&
+      asset.collision.height !== undefined
+    ) {
+      body.setSize(asset.collision.width, asset.collision.height);
+      body.setOffset(
+        asset.anchor.x * asset.frameWidth + asset.collision.offsetX - asset.collision.width / 2,
+        asset.anchor.y * asset.frameHeight + asset.collision.offsetY - asset.collision.height / 2,
+      );
+    }
     sprite.setCollideWorldBounds(true);
     this.physics.add.collider(sprite, this.obstacles);
     this.enemySprites.set(enemy.entityId, sprite);
@@ -1089,12 +1140,7 @@ export class GameScene extends Phaser.Scene {
             [0],
             config.params.projectileSpeed,
             config.params.projectileLifetimeMs,
-            Math.max(
-              1,
-              Math.floor(
-                config.params.projectileDamage * (enemy.damage / config.contactDamage) + 0.5,
-              ),
-            ),
+            scaleEnemyAttackDamage(config.params.projectileDamage, enemy.attackDamageMultiplier),
             `enemy:${enemy.entityId}`,
           );
           this.enemyRangedShotCount += 1;
@@ -1119,10 +1165,13 @@ export class GameScene extends Phaser.Scene {
       }
       if (distance > 0.001 && speed > 0) {
         const step = Math.min(distance, speed * (delta / 1000)) * movementDirection;
-        sprite.setPosition(
-          sprite.x + ((this.player.x - sprite.x) / distance) * step,
-          sprite.y + ((this.player.y - sprite.y) / distance) * step,
+        const position = this.moveActorAgainstObstacles(
+          sprite,
+          ((this.player.x - sprite.x) / distance) * step,
+          ((this.player.y - sprite.y) / distance) * step,
+          enemy.radius,
         );
+        sprite.setPosition(position.x, position.y);
         sprite.setFlipX(this.player.x < sprite.x);
       }
       if (
@@ -1248,6 +1297,24 @@ export class GameScene extends Phaser.Scene {
         Math.abs(y - obstacle.y) <= obstacle.height / 2 + radius
       );
     });
+  }
+
+  private moveActorAgainstObstacles(
+    actor: Readonly<{ x: number; y: number }>,
+    deltaX: number,
+    deltaY: number,
+    radius: number,
+  ): Readonly<{ x: number; y: number }> {
+    return moveCircleAgainstRectangles(
+      actor,
+      { x: deltaX, y: deltaY },
+      radius,
+      this.stageConfig.bounds,
+      this.obstacles.getChildren().map((child) => {
+        const obstacle = child as Phaser.GameObjects.Rectangle;
+        return { x: obstacle.x, y: obstacle.y, width: obstacle.width, height: obstacle.height };
+      }),
+    );
   }
 
   private defeatEnemy(enemy: StageEnemyState): void {
@@ -1394,10 +1461,13 @@ export class GameScene extends Phaser.Scene {
     );
     if (state !== 'telegraph' && distance > this.bossConfig.radius + 7) {
       const step = Math.min(distance, this.bossConfig.moveSpeed * (delta / 1000));
-      this.guardian.setPosition(
-        this.guardian.x + ((this.player.x - this.guardian.x) / distance) * step,
-        this.guardian.y + ((this.player.y - this.guardian.y) / distance) * step,
+      const position = this.moveActorAgainstObstacles(
+        this.guardian,
+        ((this.player.x - this.guardian.x) / distance) * step,
+        ((this.player.y - this.guardian.y) / distance) * step,
+        this.bossConfig.radius,
       );
+      this.guardian.setPosition(position.x, position.y);
     }
     const contactDistance = Phaser.Math.Distance.Between(
       this.guardian.x,
