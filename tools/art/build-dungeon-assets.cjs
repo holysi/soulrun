@@ -272,7 +272,13 @@ async function writeMap() {
   };
   const target = path.join(mapDir, 'map-dungeon.json');
   await fs.mkdir(mapDir, { recursive: true });
-  await fs.writeFile(target, await prettier.format(JSON.stringify(map), { parser: 'json' }));
+  await fs.writeFile(
+    target,
+    await prettier.format(JSON.stringify(map), {
+      ...(await prettier.resolveConfig(target)),
+      parser: 'json',
+    }),
+  );
   return map;
 }
 
@@ -471,7 +477,10 @@ async function buildDungeon() {
   ];
   await fs.writeFile(
     manifestPath,
-    await prettier.format(JSON.stringify(manifest), { parser: 'json' }),
+    await prettier.format(JSON.stringify(manifest), {
+      ...(await prettier.resolveConfig(manifestPath)),
+      parser: 'json',
+    }),
   );
   console.log(
     'Generated 5 Dungeon image assets, map-dungeon, 5 contact sheets, and a map preview.',
