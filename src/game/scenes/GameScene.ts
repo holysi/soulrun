@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 
+import dungeonMap from '../../../assets/maps/map-dungeon.json';
+
 import { imageAsset } from '../assets';
 import { circleContains, consumePenetratingHit } from '../cemetery';
 import { HEAL_PICKUP_AMOUNT, SCENE_KEYS } from '../constants';
@@ -43,6 +45,15 @@ function ghostArrowConfig() {
   }
   return weapon;
 }
+
+function evenlySpacedOffsets(count: number, arcDeg: number): number[] {
+  if (count <= 1) return [0];
+  return Array.from({ length: count }, (_, index) => -arcDeg / 2 + (arcDeg * index) / (count - 1));
+}
+
+function evenlySpacedRing(count: number): number[] {
+  return Array.from({ length: count }, (_, index) => (360 * index) / count);
+}
 const GHOST_ARROW_CONFIG = ghostArrowConfig();
 const ARROW_ASSET_KEY = GHOST_ARROW_CONFIG.assetKey;
 const PLAYER_ASSET = imageAsset(PLAYER_ASSET_KEY);
@@ -63,6 +74,7 @@ const TELEGRAPH_CIRCLE_ASSET = imageAsset('vfx-telegraph-circle');
 
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
+  private obstacles!: Phaser.Physics.Arcade.StaticGroup;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private movementKeys!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
   private escapeKey!: Phaser.Input.Keyboard.Key;
@@ -75,6 +87,8 @@ export class GameScene extends Phaser.Scene {
   private paused = false;
   private attackId = 0;
   private readonly arrows = new Map<string, Phaser.Physics.Arcade.Image>();
+  private readonly hostileProjectiles = new Map<string, Phaser.Physics.Arcade.Image>();
+  private hostileProjectileId = 0;
   private readonly projectileBudget = new ProjectileBudget(GAME_CONFIG.world.maxProjectiles);
   private eventsOut!: GameEventPublisher;
   private testControlled = false;
@@ -98,12 +112,19 @@ export class GameScene extends Phaser.Scene {
   private stageDirector!: StageDirector;
   private readonly enemySprites = new Map<string, Phaser.Physics.Arcade.Sprite>();
   private readonly enemyContactAt = new Map<string, number>();
+  private readonly enemyAttackAt = new Map<string, number>();
+  private readonly enemyTelegraphs = new Map<
+    string,
+    { readonly firesAtMs: number; readonly target: Readonly<{ x: number; y: number }> }
+  >();
   private guardian: Phaser.Physics.Arcade.Sprite | null = null;
   private guardianTimeline: BossAttackTimeline | null = null;
   private guardianAttackIndex = 0;
   private guardianPreviousAttackMs = 0;
   private guardianTarget = { x: 0, y: 0 };
   private telegraph: Phaser.GameObjects.Image | null = null;
+  private bossBlocker: Phaser.GameObjects.Rectangle | null = null;
+  private bossBlockerStartedAt = -1;
   private readonly xpGemSprites = new Map<string, Phaser.GameObjects.Image>();
   private readonly healPickups = new Map<string, Phaser.GameObjects.Image>();
   private healPickupId = 0;
@@ -121,6 +142,10 @@ export class GameScene extends Phaser.Scene {
   private secondaryHitCount = 0;
   private readonly secondaryHits = new Map<string, number>();
   private penetrationUsedCount = 0;
+  private splitSpawnCount = 0;
+  private enemyRangedShotCount = 0;
+  private bossPatternShotCount = 0;
+  private bossPatternStartedAt = -1;
 
   constructor() {
     super(SCENE_KEYS.game);
@@ -191,6 +216,8 @@ export class GameScene extends Phaser.Scene {
     this.paused = false;
     this.attackId = 0;
     this.arrows.clear();
+    this.hostileProjectiles.clear();
+    this.hostileProjectileId = 0;
     this.projectileBudget.clear();
     this.testInputs.clear();
     this.testAim = null;
@@ -212,6 +239,8 @@ export class GameScene extends Phaser.Scene {
     this.enemySprites.forEach((sprite) => sprite.destroy());
     this.enemySprites.clear();
     this.enemyContactAt.clear();
+    this.enemyAttackAt.clear();
+    this.enemyTelegraphs.clear();
     this.guardian?.destroy();
     this.guardian = null;
     this.guardianTimeline = null;
@@ -219,6 +248,9 @@ export class GameScene extends Phaser.Scene {
     this.guardianPreviousAttackMs = 0;
     this.telegraph?.destroy();
     this.telegraph = null;
+    this.bossBlocker?.destroy();
+    this.bossBlocker = null;
+    this.bossBlockerStartedAt = -1;
     this.xpGemSprites.forEach((sprite) => sprite.destroy());
     this.xpGemSprites.clear();
     this.healPickups.forEach((sprite) => sprite.destroy());
@@ -238,6 +270,10 @@ export class GameScene extends Phaser.Scene {
     this.secondaryHitCount = 0;
     this.secondaryHits.clear();
     this.penetrationUsedCount = 0;
+    this.splitSpawnCount = 0;
+    this.enemyRangedShotCount = 0;
+    this.bossPatternShotCount = 0;
+    this.bossPatternStartedAt = -1;
     this.eventsOut = new GameEventPublisher(
       this.registry.events,
       'adventure-local-1',
@@ -593,27 +629,52 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createObstacles(): void {
-    const obstacles = this.physics.add.staticGroup();
-    const placements = [
-      [WORLD_WIDTH / 2 - 128, WORLD_HEIGHT / 2 - 80, 48, 18],
-      [WORLD_WIDTH / 2 + 144, WORLD_HEIGHT / 2 + 72, 64, 18],
-      [WORLD_WIDTH / 2 - 112, WORLD_HEIGHT / 2 + 108, 22, 54],
-    ] as const;
+    this.obstacles = this.physics.add.staticGroup();
+    const placements =
+      this.stageId === 'dungeon'
+        ? dungeonMap.layers
+            .find((layer) => layer.name === this.stageConfig.obstacleLayer)!
+            .objects!.flatMap((object) =>
+              'width' in object && 'height' in object
+                ? [
+                    [
+                      object.x + object.width / 2,
+                      object.y + object.height / 2,
+                      object.width,
+                      object.height,
+                    ],
+                  ]
+                : [],
+            )
+        : [
+            [WORLD_WIDTH / 2 - 128, WORLD_HEIGHT / 2 - 80, 48, 18],
+            [WORLD_WIDTH / 2 + 144, WORLD_HEIGHT / 2 + 72, 64, 18],
+            [WORLD_WIDTH / 2 - 112, WORLD_HEIGHT / 2 + 108, 22, 54],
+          ];
     for (const [x, y, width, height] of placements) {
       const obstacle = this.add.rectangle(x, y, width, height, 0x39483b, 1);
       obstacle.setStrokeStyle(2, 0x6c7180);
-      obstacles.add(obstacle);
+      this.obstacles.add(obstacle);
     }
-    this.physics.add.collider(this.player, obstacles);
+    this.physics.add.collider(this.player, this.obstacles);
   }
 
   private drawWorld(): void {
-    this.cameras.main.setBackgroundColor('#0b1113');
+    this.cameras.main.setBackgroundColor(this.stageId === 'dungeon' ? '#0d1020' : '#0b1113');
     const grid = this.add.graphics();
-    grid.fillStyle(0x18251f, 1).fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    grid.fillStyle(0x24342a, 1).fillCircle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 105);
-    grid.lineStyle(8, 0x6a6f65, 1).strokeRect(4, 4, WORLD_WIDTH - 8, WORLD_HEIGHT - 8);
-    grid.lineStyle(1, 0x33463a, 0.42);
+    grid
+      .fillStyle(this.stageId === 'dungeon' ? 0x22263a : 0x18251f, 1)
+      .fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    if (this.stageId === 'dungeon') {
+      grid.fillStyle(0x3c4058, 0.5).fillRect(352, 240, 1216, 560);
+      grid.fillStyle(0x584780, 0.32).fillRect(784, 32, 352, 1008);
+    } else {
+      grid.fillStyle(0x24342a, 1).fillCircle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 105);
+    }
+    grid
+      .lineStyle(8, this.stageId === 'dungeon' ? 0x62657a : 0x6a6f65, 1)
+      .strokeRect(4, 4, WORLD_WIDTH - 8, WORLD_HEIGHT - 8);
+    grid.lineStyle(1, this.stageId === 'dungeon' ? 0x3c4058 : 0x33463a, 0.42);
     for (let x = 0; x <= WORLD_WIDTH; x += 16) grid.lineBetween(x, 0, x, WORLD_HEIGHT);
     for (let y = 0; y <= WORLD_HEIGHT; y += 16) grid.lineBetween(0, y, WORLD_WIDTH, y);
   }
@@ -779,6 +840,13 @@ export class GameScene extends Phaser.Scene {
     mount.dataset.secondaryHitCount = String(this.secondaryHitCount);
     mount.dataset.guardianContactHitCount = String(this.guardianContactHitCount);
     mount.dataset.penetrationUsedCount = String(this.penetrationUsedCount);
+    mount.dataset.mapKey = this.stageConfig.mapKey;
+    mount.dataset.obstacleCount = String(this.obstacles?.getLength() ?? 0);
+    mount.dataset.hostileProjectileCount = String(this.hostileProjectiles.size);
+    mount.dataset.splitSpawnCount = String(this.splitSpawnCount);
+    mount.dataset.enemyRangedShotCount = String(this.enemyRangedShotCount);
+    mount.dataset.bossPatternShotCount = String(this.bossPatternShotCount);
+    mount.dataset.bossBlockActive = String(Boolean(this.bossBlocker?.active));
     for (const key of [
       'soul-blade:enemy',
       'soul-blade:boss',
@@ -877,10 +945,18 @@ export class GameScene extends Phaser.Scene {
           arrow.y + arrowBody.velocity.y * (delta / 1000),
         );
       }
+      for (const projectile of this.hostileProjectiles.values()) {
+        const body = projectile.body as Phaser.Physics.Arcade.Body;
+        projectile.setPosition(
+          projectile.x + body.velocity.x * (delta / 1000),
+          projectile.y + body.velocity.y * (delta / 1000),
+        );
+      }
     }
     this.updateEnemies(delta);
     this.updateGuardian(delta);
     this.resolveProjectileHits();
+    this.resolveHostileProjectileHits();
     if (this.simulationSuspended()) {
       this.reflectState();
       return;
@@ -896,6 +972,8 @@ export class GameScene extends Phaser.Scene {
     for (const projectileId of this.projectileBudget.releaseExpired(this.simulationTimeMs)) {
       this.arrows.get(projectileId)?.destroy();
       this.arrows.delete(projectileId);
+      this.hostileProjectiles.get(projectileId)?.destroy();
+      this.hostileProjectiles.delete(projectileId);
     }
     this.fireWhenReady();
     this.reflectState();
@@ -972,6 +1050,7 @@ export class GameScene extends Phaser.Scene {
       .setTint(enemy.elite ? 0xf6d365 : 0xffffff)
       .setData({ entityId: enemy.entityId, cycleStartedAt: enemy.spawnedAtMs });
     sprite.setCollideWorldBounds(true);
+    this.physics.add.collider(sprite, this.obstacles);
     this.enemySprites.set(enemy.entityId, sprite);
   }
 
@@ -979,10 +1058,11 @@ export class GameScene extends Phaser.Scene {
     for (const enemy of this.stageDirector.activeEnemies) {
       const sprite = this.enemySprites.get(enemy.entityId);
       if (!sprite) continue;
+      const config = GAME_CONFIG.enemies.find((candidate) => candidate.id === enemy.enemyId)!;
       let speed = enemy.moveSpeed;
+      let movementDirection = 1;
       if (enemy.enemyId === 'bat') {
-        const config = GAME_CONFIG.enemies.find((candidate) => candidate.id === 'bat');
-        if (config?.behavior === 'dash') {
+        if (config.behavior === 'dash') {
           const cycle = config.params.windupMs + config.params.dashMs + config.params.recoveryMs;
           const elapsed = (this.simulationTimeMs - enemy.spawnedAtMs) % cycle;
           speed =
@@ -1000,8 +1080,45 @@ export class GameScene extends Phaser.Scene {
         this.player.x,
         this.player.y,
       );
-      if (distance > 0.001) {
-        const step = Math.min(distance, speed * (delta / 1000));
+      if (config.behavior === 'kite-ranged') {
+        const telegraph = this.enemyTelegraphs.get(enemy.entityId);
+        if (telegraph && this.simulationTimeMs >= telegraph.firesAtMs) {
+          this.fireHostilePattern(
+            sprite,
+            telegraph.target,
+            [0],
+            config.params.projectileSpeed,
+            config.params.projectileLifetimeMs,
+            Math.max(
+              1,
+              Math.floor(
+                config.params.projectileDamage * (enemy.damage / config.contactDamage) + 0.5,
+              ),
+            ),
+            `enemy:${enemy.entityId}`,
+          );
+          this.enemyRangedShotCount += 1;
+          this.enemyTelegraphs.delete(enemy.entityId);
+          this.enemyAttackAt.set(
+            enemy.entityId,
+            this.simulationTimeMs + config.params.attackCooldownMs,
+          );
+          sprite.setTint(enemy.elite ? 0xf6d365 : 0xffffff);
+        } else if (
+          !telegraph &&
+          this.simulationTimeMs >= (this.enemyAttackAt.get(enemy.entityId) ?? 0)
+        ) {
+          this.enemyTelegraphs.set(enemy.entityId, {
+            firesAtMs: this.simulationTimeMs + config.params.telegraphMs,
+            target: { x: this.player.x, y: this.player.y },
+          });
+          sprite.setTint(0x55c9d3);
+        }
+        if (distance < config.params.retreatDistance) movementDirection = -1;
+        else if (distance <= config.params.preferredDistance) speed = 0;
+      }
+      if (distance > 0.001 && speed > 0) {
+        const step = Math.min(distance, speed * (delta / 1000)) * movementDirection;
         sprite.setPosition(
           sprite.x + ((this.player.x - sprite.x) / distance) * step,
           sprite.y + ((this.player.y - sprite.y) / distance) * step,
@@ -1073,6 +1190,66 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private fireHostilePattern(
+    origin: Readonly<{ x: number; y: number }>,
+    target: Readonly<{ x: number; y: number }>,
+    angleOffsetsDeg: readonly number[],
+    speed: number,
+    lifetimeMs: number,
+    damage: number,
+    sourceId: string,
+  ): boolean {
+    const firstId = this.hostileProjectileId + 1;
+    const ids = angleOffsetsDeg.map((_, index) => `hostile:${firstId + index}`);
+    if (!this.projectileBudget.reservePattern(ids, this.simulationTimeMs, lifetimeMs)) return false;
+    this.hostileProjectileId += ids.length;
+    const baseAngle = Phaser.Math.Angle.Between(origin.x, origin.y, target.x, target.y);
+    ids.forEach((id, index) => {
+      const angle = baseAngle + Phaser.Math.DegToRad(angleOffsetsDeg[index] ?? 0);
+      const projectile = this.physics.add
+        .image(origin.x, origin.y, ARROW_ASSET_KEY)
+        .setDepth(2)
+        .setTint(0x8e70ba)
+        .setRotation(angle)
+        .setData({ damage, sourceId });
+      projectile.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+      this.hostileProjectiles.set(id, projectile);
+    });
+    return true;
+  }
+
+  private resolveHostileProjectileHits(): void {
+    for (const [projectileId, projectile] of [...this.hostileProjectiles]) {
+      if (this.pointTouchesObstacle(projectile.x, projectile.y, 4)) {
+        projectile.destroy();
+        this.hostileProjectiles.delete(projectileId);
+        this.projectileBudget.release(projectileId);
+        continue;
+      }
+      if (
+        Phaser.Math.Distance.Between(projectile.x, projectile.y, this.player.x, this.player.y) > 14
+      )
+        continue;
+      const damage = Number(projectile.getData('damage')) || 0;
+      const sourceId = String(projectile.getData('sourceId') ?? this.bossConfig.id);
+      if (sourceId.startsWith('boss:')) this.damagePlayerFromBoss(damage, sourceId.slice(5));
+      else this.damagePlayer(damage, sourceId);
+      projectile.destroy();
+      this.hostileProjectiles.delete(projectileId);
+      this.projectileBudget.release(projectileId);
+    }
+  }
+
+  private pointTouchesObstacle(x: number, y: number, radius: number): boolean {
+    return this.obstacles.getChildren().some((child) => {
+      const obstacle = child as Phaser.GameObjects.Rectangle;
+      return (
+        Math.abs(x - obstacle.x) <= obstacle.width / 2 + radius &&
+        Math.abs(y - obstacle.y) <= obstacle.height / 2 + radius
+      );
+    });
+  }
+
   private defeatEnemy(enemy: StageEnemyState): void {
     const sprite = this.enemySprites.get(enemy.entityId);
     const x = sprite?.x ?? enemy.x;
@@ -1084,6 +1261,18 @@ export class GameScene extends Phaser.Scene {
     this.killsByEnemyId.set(enemy.enemyId, (this.killsByEnemyId.get(enemy.enemyId) ?? 0) + 1);
     this.awardEnemyDefeat(enemy.entityId, enemy.enemyId, enemy.elite, x, y);
     if (this.lootRandom.next() < GAME_CONFIG.progression.healDropChance) this.spawnHealing(x, y);
+    const config = GAME_CONFIG.enemies.find((candidate) => candidate.id === enemy.enemyId)!;
+    if (config.behavior === 'split') {
+      const children = this.stageDirector.summon(
+        config.params.childEnemyId,
+        config.params.childCount,
+        { x, y },
+        18,
+        this.simulationTimeMs,
+      );
+      this.splitSpawnCount += children.length;
+      for (const event of children) this.handleStageEvent(event);
+    }
   }
 
   private spawnHealing(x: number, y: number): void {
@@ -1130,7 +1319,7 @@ export class GameScene extends Phaser.Scene {
     this.guardianTarget = { x: this.player.x, y: this.player.y };
     this.telegraph?.destroy();
     if (!this.guardian) return;
-    if (attack.kind === 'line') {
+    if (attack.kind === 'line' || attack.kind === 'fan') {
       const angle = Phaser.Math.Angle.Between(
         this.guardian.x,
         this.guardian.y,
@@ -1141,13 +1330,23 @@ export class GameScene extends Phaser.Scene {
         .image(this.guardian.x, this.guardian.y, 'vfx-telegraph-line')
         .setOrigin(0, 0.5)
         .setRotation(angle)
-        .setDisplaySize(attack.length, attack.width)
+        .setDisplaySize(
+          attack.kind === 'line' ? attack.length : 180,
+          attack.kind === 'line' ? attack.width : 80,
+        )
+        .setDepth(1)
+        .setAlpha(0.75);
+    } else if (attack.kind === 'block') {
+      this.telegraph = this.add
+        .image(this.guardianTarget.x, this.guardianTarget.y, 'vfx-telegraph-line')
+        .setDisplaySize(attack.width, attack.height)
         .setDepth(1)
         .setAlpha(0.75);
     } else {
       const radius =
-        attack.kind === 'slam' ? attack.radius : attack.kind === 'summon' ? attack.spawnRadius : 48;
-      const center = attack.kind === 'summon' ? this.guardian : this.guardianTarget;
+        attack.kind === 'slam' ? attack.radius : attack.kind === 'summon' ? attack.spawnRadius : 80;
+      const center =
+        attack.kind === 'summon' || attack.kind === 'ring' ? this.guardian : this.guardianTarget;
       this.telegraph = this.add
         .image(center.x, center.y, 'vfx-telegraph-circle')
         .setDisplaySize(radius * 2, radius * 2)
@@ -1164,6 +1363,28 @@ export class GameScene extends Phaser.Scene {
     if (state === 'telegraph')
       this.telegraph?.setAlpha(0.45 + Math.sin(this.simulationTimeMs / 70) * 0.2);
     else this.telegraph?.setAlpha(state === 'active' ? 0.95 : 0.2);
+    if (
+      timeline.attack.kind === 'block' &&
+      state === 'active' &&
+      this.bossBlockerStartedAt !== timeline.telegraphStartedAtMs
+    ) {
+      this.bossBlocker?.destroy();
+      this.bossBlockerStartedAt = timeline.telegraphStartedAtMs;
+      this.bossBlocker = this.add
+        .rectangle(
+          this.guardianTarget.x,
+          this.guardianTarget.y,
+          timeline.attack.width,
+          timeline.attack.height,
+          0x584780,
+          0.72,
+        )
+        .setDepth(2);
+      this.obstacles.add(this.bossBlocker);
+    } else if (timeline.attack.kind !== 'block' || state !== 'active') {
+      this.bossBlocker?.destroy();
+      this.bossBlocker = null;
+    }
 
     const distance = Phaser.Math.Distance.Between(
       this.guardian.x,
@@ -1201,6 +1422,32 @@ export class GameScene extends Phaser.Scene {
       this.bossDamageMoments.add(moment);
       if (this.guardianAttackHitsPlayer(timeline.attack)) {
         this.damagePlayerFromBoss(timeline.attack.damage, this.bossConfig.id);
+      }
+    }
+    if (timeline.attack.kind === 'fan' || timeline.attack.kind === 'ring') {
+      const activeAt = timeline.telegraphStartedAtMs + timeline.attack.telegraphMs;
+      if (
+        this.guardianPreviousAttackMs < activeAt &&
+        this.simulationTimeMs >= activeAt &&
+        this.bossPatternStartedAt !== timeline.telegraphStartedAtMs
+      ) {
+        this.bossPatternStartedAt = timeline.telegraphStartedAtMs;
+        const offsets =
+          timeline.attack.kind === 'fan'
+            ? evenlySpacedOffsets(timeline.attack.projectileCount, timeline.attack.arcDeg)
+            : evenlySpacedRing(timeline.attack.projectileCount);
+        if (
+          this.fireHostilePattern(
+            this.guardian,
+            this.guardianTarget,
+            offsets,
+            timeline.attack.projectileSpeed,
+            timeline.attack.projectileLifetimeMs,
+            timeline.attack.damage,
+            `boss:${this.bossConfig.id}`,
+          )
+        )
+          this.bossPatternShotCount += offsets.length;
       }
     }
     if (timeline.attack.kind === 'summon') {
@@ -1244,6 +1491,12 @@ export class GameScene extends Phaser.Scene {
       );
       return along >= 0 && along <= attack.length && across <= attack.width / 2 + 7;
     }
+    if (attack.kind === 'block') {
+      return (
+        Math.abs(this.player.x - this.guardianTarget.x) <= attack.width / 2 + 7 &&
+        Math.abs(this.player.y - this.guardianTarget.y) <= attack.height / 2 + 7
+      );
+    }
     return false;
   }
 
@@ -1276,6 +1529,8 @@ export class GameScene extends Phaser.Scene {
   private clearBattlefield(): void {
     this.telegraph?.destroy();
     this.telegraph = null;
+    this.bossBlocker?.destroy();
+    this.bossBlocker = null;
     this.guardian?.destroy();
     this.guardian = null;
     this.guardianTimeline = null;
@@ -1284,8 +1539,12 @@ export class GameScene extends Phaser.Scene {
     }
     this.enemySprites.clear();
     this.enemyContactAt.clear();
+    this.enemyAttackAt.clear();
+    this.enemyTelegraphs.clear();
     for (const arrow of this.arrows.values()) arrow.destroy();
     this.arrows.clear();
+    for (const projectile of this.hostileProjectiles.values()) projectile.destroy();
+    this.hostileProjectiles.clear();
     this.projectileBudget.clear();
     for (const pickup of this.healPickups.values()) pickup.destroy();
     this.healPickups.clear();
