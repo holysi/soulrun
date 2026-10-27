@@ -35,6 +35,9 @@ test('loads the Dungeon map and runs ranged and splitting enemy behaviors', asyn
       (await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot()))?.enemyCountsById ?? {},
     ).every((id) => ['skeleton-archer', 'splitting-slime', 'small-slime', 'zombie'].includes(id)),
   ).toBe(true);
+  if (process.env.CAPTURE_EVIDENCE === '1') {
+    await page.screenshot({ path: 'docs/evidence/issue-10-dungeon.png' });
+  }
 });
 
 test('runs the Skeleton Warden phases and hands off to Inferno', async ({ page }) => {
