@@ -59,3 +59,14 @@ npm run art:validate
 Generated source boards are retained for auditability. Runtime assets are
 smaller, palette-locked derivatives; regenerating from the committed sources
 does not call ImageGen again.
+
+## Dungeon Placeholder Provenance
+
+Issue #10 adds original, deterministic placeholder art for the Dungeon without
+external inputs or another ImageGen call. `tools/art/build-dungeon-assets.cjs`
+draws the Skeleton Archer, Splitting Slime, Small Slime, Skeleton Warden, and
+Dungeon tiles from integer-aligned shapes using only the frozen Dungeon
+palette. The same script assembles eight-direction idle/walk/hurt sheets,
+removes PNG density metadata, writes `map-dungeon.json`, and produces labeled
+contact sheets. These placeholders use the final manifest keys and frame
+contracts so Issue #14 can replace their pixels without runtime code changes.

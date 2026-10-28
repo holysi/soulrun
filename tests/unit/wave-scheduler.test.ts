@@ -38,8 +38,20 @@ describe('wave scheduler', () => {
 
   it('applies loop, elite, then cap scaling with final half-up rounding', () => {
     const zombie = GAME_CONFIG.enemies[0];
-    expect(
-      scaleEnemyStats(zombie, 1, true, 2, cemetery.capEscalation, GAME_CONFIG.progression),
-    ).toEqual({ maximumHealth: 123, damage: 15, moveSpeed: 43.26, radius: 8.75 });
+    const scaled = scaleEnemyStats(
+      zombie,
+      1,
+      true,
+      2,
+      cemetery.capEscalation,
+      GAME_CONFIG.progression,
+    );
+    expect(scaled).toMatchObject({
+      maximumHealth: 123,
+      damage: 15,
+      moveSpeed: 43.26,
+      radius: 8.75,
+    });
+    expect(scaled.attackDamageMultiplier).toBeCloseTo(1.872);
   });
 });

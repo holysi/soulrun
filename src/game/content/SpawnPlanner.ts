@@ -27,11 +27,14 @@ export function isLegalSpawn(
   player: Point,
   offscreenMargin: number,
   safeRadius: number,
+  excludedRects: readonly Rect[] = [],
+  collisionPadding = 0,
 ): boolean {
   return (
     contains(mapBounds, point) &&
     !contains(cameraBounds, point, offscreenMargin) &&
-    distanceSquared(point, player) >= safeRadius ** 2
+    distanceSquared(point, player) >= safeRadius ** 2 &&
+    !excludedRects.some((rect) => contains(rect, point, collisionPadding))
   );
 }
 
@@ -65,6 +68,8 @@ export function planSpawnBatch(
     safeSpawnRadius: number;
     offscreenSpawnMargin: number;
     random: RandomSource;
+    excludedRects?: readonly Rect[];
+    collisionPadding?: number;
     maxPositionAttempts?: number;
   }>,
 ): Readonly<{ requests: readonly SpawnRequest[]; skippedByCap: number }> {
@@ -98,6 +103,8 @@ export function planSpawnBatch(
           options.player,
           options.offscreenSpawnMargin,
           options.safeSpawnRadius,
+          options.excludedRects,
+          options.collisionPadding,
         )
       ) {
         position = candidate;
