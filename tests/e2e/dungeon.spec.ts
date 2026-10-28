@@ -69,6 +69,24 @@ test('blocks the player and Ghost Arrow at Dungeon walls', async ({ page }) => {
   );
 });
 
+test('uses the authored rectangular arrow body for diagonal wall near misses', async ({ page }) => {
+  await page.goto('/?test=1&seed=dungeon-arrow-body-001');
+  await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
+    await api.ready();
+    await api.startAdventure({ seed: 'dungeon-arrow-body-001', stageId: 'dungeon' });
+    api.aimAt(1400, 767);
+    await api.advance(850);
+  });
+
+  await expect(page.locator('[data-testid="game-root"]')).toHaveAttribute(
+    'data-active-ghost-arrow-count',
+    '1',
+  );
+});
+
 test('runs the Skeleton Warden phases and hands off to Inferno', async ({ page }) => {
   await page.goto('/?test=1&seed=dungeon-boss-001');
   await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
@@ -136,7 +154,7 @@ test('activates and removes the Warden corridor block after its telegraph', asyn
   });
   expect(
     (await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot()))?.player.y,
-  ).toBeGreaterThanOrEqual(556);
+  ).toBeGreaterThanOrEqual(561);
   await page.evaluate(async () => window.__SOULRUN_TEST__?.advance(900));
   await expect(root).toHaveAttribute('data-boss-block-active', 'false');
 });

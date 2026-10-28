@@ -97,6 +97,22 @@ const PLAYER_COLLISION = (() => {
   };
 })();
 const PLAYER_COLLISION_RADIUS = PLAYER_COLLISION.radius;
+const ARROW_COLLISION = (() => {
+  const collision = ARROW_ASSET.collision;
+  if (
+    collision?.shape !== 'rect' ||
+    collision.width === undefined ||
+    collision.height === undefined
+  ) {
+    throw new Error(`${ARROW_ASSET_KEY} requires rectangle collision data`);
+  }
+  return {
+    offsetX: collision.offsetX,
+    offsetY: collision.offsetY,
+    width: collision.width,
+    height: collision.height,
+  };
+})();
 function weaponConfig(id: 'soul-blade' | 'death-aura') {
   const weapon = GAME_CONFIG.weapons.find((candidate) => candidate.id === id);
   if (!weapon) throw new Error(`${id} config is missing`);
@@ -820,23 +836,19 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.attackId += 1;
-    const collision = ARROW_ASSET.collision;
-    if (
-      collision?.shape !== 'rect' ||
-      collision.width === undefined ||
-      collision.height === undefined
-    ) {
-      throw new Error(`${ARROW_ASSET_KEY} requires rectangle collision data`);
-    }
-    const collisionWidth = collision.width;
-    const collisionHeight = collision.height;
+    const collisionWidth = ARROW_COLLISION.width;
+    const collisionHeight = ARROW_COLLISION.height;
     projectileIds.forEach((attackId, index) => {
       const arrow = this.physics.add.image(this.player.x, this.player.y - 6, ARROW_ASSET_KEY);
       const body = arrow.body as Phaser.Physics.Arcade.Body;
       body.setSize(collisionWidth, collisionHeight);
       body.setOffset(
-        ARROW_ASSET.anchor.x * ARROW_ASSET.frameWidth + collision.offsetX - collisionWidth / 2,
-        ARROW_ASSET.anchor.y * ARROW_ASSET.frameHeight + collision.offsetY - collisionHeight / 2,
+        ARROW_ASSET.anchor.x * ARROW_ASSET.frameWidth +
+          ARROW_COLLISION.offsetX -
+          collisionWidth / 2,
+        ARROW_ASSET.anchor.y * ARROW_ASSET.frameHeight +
+          ARROW_COLLISION.offsetY -
+          collisionHeight / 2,
       );
       const spread = Phaser.Math.DegToRad((index - (projectileCount - 1) / 2) * 8);
       const angle = Math.atan2(this.aimVector.y, this.aimVector.x) + spread;
@@ -999,13 +1011,20 @@ export class GameScene extends Phaser.Scene {
     this.updateMovement();
     if (manuallyIntegrateMovement) {
       const body = this.player.body as Phaser.Physics.Arcade.Body;
-      const playerPosition = this.moveActorAgainstObstacles(
-        this.player,
+      const playerCollisionCenter = {
+        x: this.player.x + PLAYER_COLLISION.offsetX,
+        y: this.player.y + PLAYER_COLLISION.offsetY,
+      };
+      const resolvedCenter = this.moveActorAgainstObstacles(
+        playerCollisionCenter,
         body.velocity.x * (delta / 1000),
         body.velocity.y * (delta / 1000),
         PLAYER_COLLISION_RADIUS,
       );
-      this.player.setPosition(playerPosition.x, playerPosition.y);
+      this.player.setPosition(
+        resolvedCenter.x - PLAYER_COLLISION.offsetX,
+        resolvedCenter.y - PLAYER_COLLISION.offsetY,
+      );
       for (const arrow of this.arrows.values()) {
         const arrowBody = arrow.body as Phaser.Physics.Arcade.Body;
         arrow.setPosition(
@@ -1221,8 +1240,14 @@ export class GameScene extends Phaser.Scene {
 
   private resolveProjectileHits(): void {
     for (const [projectileId, arrow] of [...this.arrows]) {
-      const body = arrow.body as Phaser.Physics.Arcade.Body;
-      if (this.pointTouchesObstacle(arrow.x, arrow.y, Math.max(body.width, body.height) / 2)) {
+      if (
+        this.rectangleTouchesObstacle(
+          arrow.x + ARROW_COLLISION.offsetX,
+          arrow.y + ARROW_COLLISION.offsetY,
+          ARROW_COLLISION.width,
+          ARROW_COLLISION.height,
+        )
+      ) {
         arrow.destroy();
         this.arrows.delete(projectileId);
         this.projectileBudget.release(projectileId);
@@ -1337,6 +1362,16 @@ export class GameScene extends Phaser.Scene {
       return (
         Math.abs(x - obstacle.x) <= obstacle.width / 2 + radius &&
         Math.abs(y - obstacle.y) <= obstacle.height / 2 + radius
+      );
+    });
+  }
+
+  private rectangleTouchesObstacle(x: number, y: number, width: number, height: number): boolean {
+    return this.obstacles.getChildren().some((child) => {
+      const obstacle = child as Phaser.GameObjects.Rectangle;
+      return (
+        Math.abs(x - obstacle.x) <= (width + obstacle.width) / 2 &&
+        Math.abs(y - obstacle.y) <= (height + obstacle.height) / 2
       );
     });
   }
