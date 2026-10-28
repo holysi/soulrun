@@ -85,6 +85,18 @@ const GHOST_ARROW_CONFIG = ghostArrowConfig();
 const ARROW_ASSET_KEY = GHOST_ARROW_CONFIG.assetKey;
 const PLAYER_ASSET = imageAsset(PLAYER_ASSET_KEY);
 const ARROW_ASSET = imageAsset(ARROW_ASSET_KEY);
+const PLAYER_COLLISION = (() => {
+  const collision = PLAYER_ASSET.collision;
+  if (collision?.shape !== 'circle' || collision.radius === undefined) {
+    throw new Error(`${PLAYER_ASSET_KEY} requires circle collision data`);
+  }
+  return {
+    offsetX: collision.offsetX,
+    offsetY: collision.offsetY,
+    radius: collision.radius,
+  };
+})();
+const PLAYER_COLLISION_RADIUS = PLAYER_COLLISION.radius;
 function weaponConfig(id: 'soul-blade' | 'death-aura') {
   const weapon = GAME_CONFIG.weapons.find((candidate) => candidate.id === id);
   if (!weapon) throw new Error(`${id} config is missing`);
@@ -657,14 +669,14 @@ export class GameScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, PLAYER_ASSET_KEY, 0);
     this.player.setOrigin(PLAYER_ASSET.anchor.x, PLAYER_ASSET.anchor.y).setCollideWorldBounds(true);
     const body = this.player.body as Phaser.Physics.Arcade.Body;
-    const collision = PLAYER_ASSET.collision;
-    if (collision?.shape !== 'circle' || collision.radius === undefined) {
-      throw new Error(`${PLAYER_ASSET_KEY} requires circle collision data`);
-    }
     body.setCircle(
-      collision.radius,
-      PLAYER_ASSET.anchor.x * PLAYER_ASSET.frameWidth + collision.offsetX - collision.radius,
-      PLAYER_ASSET.anchor.y * PLAYER_ASSET.frameHeight + collision.offsetY - collision.radius,
+      PLAYER_COLLISION_RADIUS,
+      PLAYER_ASSET.anchor.x * PLAYER_ASSET.frameWidth +
+        PLAYER_COLLISION.offsetX -
+        PLAYER_COLLISION_RADIUS,
+      PLAYER_ASSET.anchor.y * PLAYER_ASSET.frameHeight +
+        PLAYER_COLLISION.offsetY -
+        PLAYER_COLLISION_RADIUS,
     );
     this.player.play('player-idle-e');
   }
@@ -880,6 +892,7 @@ export class GameScene extends Phaser.Scene {
     mount.dataset.playerY = this.player.y.toFixed(2);
     mount.dataset.aimDirection = this.aimDirection;
     mount.dataset.ghostArrowCount = String(this.attackId);
+    mount.dataset.activeGhostArrowCount = String(this.arrows.size);
     mount.dataset.soulBladeCount = String(this.soulBlades.length);
     mount.dataset.deathAuraCount = String(this.secondaryAttackId);
     mount.dataset.secondaryHitCount = String(this.secondaryHitCount);
@@ -986,10 +999,13 @@ export class GameScene extends Phaser.Scene {
     this.updateMovement();
     if (manuallyIntegrateMovement) {
       const body = this.player.body as Phaser.Physics.Arcade.Body;
-      this.player.setPosition(
-        Phaser.Math.Clamp(this.player.x + body.velocity.x * (delta / 1000), 0, WORLD_WIDTH),
-        Phaser.Math.Clamp(this.player.y + body.velocity.y * (delta / 1000), 0, WORLD_HEIGHT),
+      const playerPosition = this.moveActorAgainstObstacles(
+        this.player,
+        body.velocity.x * (delta / 1000),
+        body.velocity.y * (delta / 1000),
+        PLAYER_COLLISION_RADIUS,
       );
+      this.player.setPosition(playerPosition.x, playerPosition.y);
       for (const arrow of this.arrows.values()) {
         const arrowBody = arrow.body as Phaser.Physics.Arcade.Body;
         arrow.setPosition(
@@ -1205,6 +1221,13 @@ export class GameScene extends Phaser.Scene {
 
   private resolveProjectileHits(): void {
     for (const [projectileId, arrow] of [...this.arrows]) {
+      const body = arrow.body as Phaser.Physics.Arcade.Body;
+      if (this.pointTouchesObstacle(arrow.x, arrow.y, Math.max(body.width, body.height) / 2)) {
+        arrow.destroy();
+        this.arrows.delete(projectileId);
+        this.projectileBudget.release(projectileId);
+        continue;
+      }
       let hitIds = (arrow.getData('hitIds') as Set<string> | undefined) ?? new Set<string>();
       let remainingPenetration = Number(arrow.getData('penetration')) || 0;
       let shouldRelease = false;

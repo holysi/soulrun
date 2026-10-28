@@ -40,6 +40,35 @@ test('loads the Dungeon map and runs ranged and splitting enemy behaviors', asyn
   }
 });
 
+test('blocks the player and Ghost Arrow at Dungeon walls', async ({ page }) => {
+  await page.goto('/?test=1&seed=dungeon-collision-001');
+  await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
+    await api.ready();
+    await api.startAdventure({ seed: 'dungeon-collision-001', stageId: 'dungeon' });
+    api.aimAt(1400, 536);
+    await api.advance(800);
+  });
+
+  const root = page.locator('[data-testid="game-root"]');
+  await expect(root).toHaveAttribute('data-ghost-arrow-count', '1');
+  await expect(root).toHaveAttribute('data-active-ghost-arrow-count', '0');
+
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
+    api.input('right', true);
+    await api.advance(2000);
+    api.input('right', false);
+  });
+  expect((await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot()))?.player.x).toBeCloseTo(
+    1128,
+    4,
+  );
+});
+
 test('runs the Skeleton Warden phases and hands off to Inferno', async ({ page }) => {
   await page.goto('/?test=1&seed=dungeon-boss-001');
   await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
@@ -89,12 +118,25 @@ test('activates and removes the Warden corridor block after its telegraph', asyn
     await api.ready();
     await api.startAdventure({ seed: 'dungeon-block-001', stageId: 'dungeon' });
     await api.forceBoss();
-    api.input('right', true);
-    await api.advance(7000);
+    await api.advance(6100);
+    api.input('down', true);
+    await api.advance(700);
+    api.input('down', false);
+    await api.advance(200);
   });
 
   const root = page.locator('[data-testid="game-root"]');
   await expect(root).toHaveAttribute('data-boss-block-active', 'true');
-  await page.evaluate(async () => window.__SOULRUN_TEST__?.advance(1900));
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
+    api.input('up', true);
+    await api.advance(1000);
+    api.input('up', false);
+  });
+  expect(
+    (await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot()))?.player.y,
+  ).toBeGreaterThanOrEqual(556);
+  await page.evaluate(async () => window.__SOULRUN_TEST__?.advance(900));
   await expect(root).toHaveAttribute('data-boss-block-active', 'false');
 });
