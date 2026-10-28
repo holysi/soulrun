@@ -78,7 +78,7 @@ test('uses the authored rectangular arrow body for diagonal wall near misses', a
     await api.ready();
     await api.startAdventure({ seed: 'dungeon-arrow-body-001', stageId: 'dungeon' });
     api.aimAt(1400, 767);
-    await api.advance(850);
+    await api.advance(870);
   });
 
   await expect(page.locator('[data-testid="game-root"]')).toHaveAttribute(
