@@ -49,6 +49,13 @@ test('runs the Skeleton Warden phases and hands off to Inferno', async ({ page }
     await api.ready();
     await api.startAdventure({ seed: 'dungeon-boss-001', stageId: 'dungeon' });
     await api.forceBoss();
+  });
+  const root = page.locator('[data-testid="game-root"]');
+  await expect(root).toHaveAttribute('data-boss-x', '960.00');
+  await expect(root).toHaveAttribute('data-boss-y', '176.00');
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
     api.damageBoss(1200);
     await api.advance(1000);
   });
@@ -58,11 +65,7 @@ test('runs the Skeleton Warden phases and hands off to Inferno', async ({ page }
     stageId: 'dungeon',
     boss: { id: 'skeleton-warden', health: 1000, phase: 2 },
   });
-  expect(
-    Number(
-      await page.locator('[data-testid="game-root"]').getAttribute('data-boss-pattern-shot-count'),
-    ),
-  ).toBeGreaterThanOrEqual(7);
+  expect(Number(await root.getAttribute('data-boss-pattern-shot-count'))).toBeGreaterThanOrEqual(7);
 
   await page.evaluate(() => window.__SOULRUN_TEST__?.damageBoss(2200));
   expect(await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot())).toMatchObject({

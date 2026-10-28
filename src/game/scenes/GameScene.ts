@@ -70,6 +70,17 @@ function stageObstacleRects(stageId: TestSnapshot['stageId']) {
       : [],
   );
 }
+
+function stageMapSpawn(
+  stageId: TestSnapshot['stageId'],
+  name: 'player' | 'boss',
+): Readonly<{ x: number; y: number }> | null {
+  if (stageId !== 'dungeon') return null;
+  const stage = GAME_CONFIG.stages.find((candidate) => candidate.id === stageId)!;
+  const layer = mapAsset(stage.mapKey).data.layers.find((candidate) => candidate.name === 'spawns');
+  const spawn = layer?.objects?.find((object) => object.name === name);
+  return spawn ? { x: spawn.x, y: spawn.y } : null;
+}
 const GHOST_ARROW_CONFIG = ghostArrowConfig();
 const ARROW_ASSET_KEY = GHOST_ARROW_CONFIG.assetKey;
 const PLAYER_ASSET = imageAsset(PLAYER_ASSET_KEY);
@@ -408,6 +419,7 @@ export class GameScene extends Phaser.Scene {
     if (this.model.dead) throw new Error('Boss can only be forced during play');
     const event = this.stageDirector.forceBoss(this.simulationTimeMs);
     if (event) this.handleStageEvent(event);
+    this.reflectState();
   }
 
   damageBossForTest(amount: number): void {
@@ -897,6 +909,13 @@ export class GameScene extends Phaser.Scene {
     mount.dataset.xpGemCount = String(this.xpGems.size);
     mount.dataset.healPickupCount = String(this.healPickups.size);
     mount.dataset.bossPhase = String(this.stageDirector.boss?.phase ?? 0);
+    if (this.guardian) {
+      mount.dataset.bossX = this.guardian.x.toFixed(2);
+      mount.dataset.bossY = this.guardian.y.toFixed(2);
+    } else {
+      delete mount.dataset.bossX;
+      delete mount.dataset.bossY;
+    }
     mount.dataset.stageCompleted = String(this.stageCompleted);
     mount.dataset.musicCue = this.stageDirector.boss?.health
       ? this.bossConfig.musicKey
@@ -1359,8 +1378,9 @@ export class GameScene extends Phaser.Scene {
 
   private spawnGuardian(): void {
     this.upgradeFlow.enterBaseState('boss-fight');
-    const spawnX = Phaser.Math.Clamp(this.player.x, 96, WORLD_WIDTH - 96);
-    const spawnY = Phaser.Math.Clamp(this.player.y - 170, 72, WORLD_HEIGHT - 72);
+    const mapSpawn = stageMapSpawn(this.stageId, 'boss');
+    const spawnX = mapSpawn?.x ?? Phaser.Math.Clamp(this.player.x, 96, WORLD_WIDTH - 96);
+    const spawnY = mapSpawn?.y ?? Phaser.Math.Clamp(this.player.y - 170, 72, WORLD_HEIGHT - 72);
     this.guardian = this.physics.add
       .sprite(spawnX, spawnY, this.bossConfig.assetKey, 0)
       .setDepth(3)
