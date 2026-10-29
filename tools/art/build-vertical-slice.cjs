@@ -712,6 +712,7 @@ async function main() {
   ];
   const manifest = await writeManifest();
   await require('./build-dungeon-assets.cjs').buildDungeon();
+  await require('./build-inferno-assets.cjs').buildInferno();
   const manifestByKey = new Map(manifest.images.map((asset) => [asset.key, asset]));
   await save(
     path.join(previewDir, 'player-soul-guide-contact-sheet.png'),

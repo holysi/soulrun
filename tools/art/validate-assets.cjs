@@ -129,6 +129,9 @@ async function validateDirectionalSemantics(file, asset) {
       'enemy-splitting-slime',
       'enemy-small-slime',
       'boss-skeleton-warden',
+      'enemy-swift-demon',
+      'enemy-flame-skull',
+      'boss-flame-demon',
     ].includes(asset.key)
   )
     return;
@@ -208,7 +211,8 @@ async function validateImage(asset, palettes) {
       .join('');
     expect(approved.has(rgb), `${asset.key}: color #${rgb} is outside ${asset.paletteId}`);
   }
-  expect(transparent > 0, `${asset.key}: lacks transparent pixels`);
+  // Lava is stretched to authored hazard bounds, so an opaque frame prevents invisible damage strips.
+  if (asset.key !== 'vfx-lava') expect(transparent > 0, `${asset.key}: lacks transparent pixels`);
   const frameCount = (asset.width / asset.frameWidth) * (asset.height / asset.frameHeight);
   for (const animation of asset.animations || []) {
     expect(animation.frameRate > 0, `${asset.key}/${animation.key}: invalid frame rate`);
@@ -237,7 +241,7 @@ async function main() {
   expect(new Set(keys).size === keys.length, 'duplicate image key');
   const palettes = new Set(paletteIds);
   for (const asset of manifest.images) await validateImage(asset, palettes);
-  for (const tileKey of ['tileset-cemetery', 'tileset-dungeon']) {
+  for (const tileKey of ['tileset-cemetery', 'tileset-dungeon', 'tileset-inferno']) {
     const tile = manifest.images.find((asset) => asset.key === tileKey);
     expect(tile, `missing ${tileKey}`);
     const { data } = await sharp(path.join(root, tile.path))
@@ -269,6 +273,34 @@ async function main() {
     'map-dungeon: incomplete ground grid',
   );
   expect(mapLayers.get('obstacles').objects.length > 4, 'map-dungeon: obstacles are incomplete');
+  const infernoMapEntry = manifest.maps.find((entry) => entry.key === 'map-inferno');
+  expect(infernoMapEntry, 'missing map-inferno manifest entry');
+  expect(exactCaseExists(infernoMapEntry.path), 'missing or case-mismatched map-inferno file');
+  const infernoMap = JSON.parse(fs.readFileSync(path.join(root, infernoMapEntry.path), 'utf8'));
+  expect(infernoMap.width === 120 && infernoMap.height === 67, 'map-inferno: invalid bounds');
+  expect(
+    infernoMap.width * infernoMap.tilewidth === 1920 &&
+      infernoMap.height * infernoMap.tileheight === 1072,
+    'map-inferno: dimensions do not match world bounds',
+  );
+  const infernoLayers = new Map(infernoMap.layers.map((layer) => [layer.name, layer]));
+  for (const layer of infernoMapEntry.layers) {
+    expect(infernoLayers.has(layer.name), `map-inferno: missing ${layer.name} layer`);
+  }
+  expect(
+    infernoLayers.get('ground').data.length === infernoMap.width * infernoMap.height,
+    'map-inferno: incomplete ground grid',
+  );
+  const fixedHazards = infernoLayers.get('hazards').objects;
+  expect(fixedHazards.length === 4, 'map-inferno: expected four fixed lava zones');
+  for (const hazard of fixedHazards) {
+    const properties = new Map(
+      hazard.properties.map((property) => [property.name, property.value]),
+    );
+    expect(properties.get('hazardId') === hazard.name, `${hazard.name}: hazardId must be stable`);
+    expect(properties.get('damage') > 0, `${hazard.name}: damage must be positive`);
+    expect(properties.get('tickMs') > 0, `${hazard.name}: tickMs must be positive`);
+  }
   for (const preview of [
     'player-soul-guide-contact-sheet.png',
     'enemy-zombie-contact-sheet.png',
@@ -281,6 +313,13 @@ async function main() {
     'boss-skeleton-warden-contact-sheet.png',
     'dungeon-vertical-slice-contact-sheet.png',
     'map-dungeon-preview.png',
+    'enemy-swift-demon-contact-sheet.png',
+    'enemy-flame-skull-contact-sheet.png',
+    'boss-flame-demon-contact-sheet.png',
+    'tileset-inferno-contact-sheet.png',
+    'vfx-lava-contact-sheet.png',
+    'inferno-vertical-slice-contact-sheet.png',
+    'map-inferno-preview.png',
   ]) {
     expect(exactCaseExists(`docs/art/previews/${preview}`), `missing preview ${preview}`);
   }

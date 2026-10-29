@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { imageAsset, mapAsset } from '../assets';
+import type { StageMapObject } from '../assets';
 import { circleContains, consumePenetratingHit } from '../cemetery';
 import { HEAL_PICKUP_AMOUNT, SCENE_KEYS } from '../constants';
 import {
@@ -59,7 +60,7 @@ function evenlySpacedRing(count: number): number[] {
 }
 
 function stageObstacleRects(stageId: TestSnapshot['stageId']) {
-  if (stageId !== 'dungeon') return [];
+  if (stageId === 'cemetery') return [];
   const stage = GAME_CONFIG.stages.find((candidate) => candidate.id === stageId)!;
   const layer = mapAsset(stage.mapKey).data.layers.find(
     (candidate) => candidate.name === stage.obstacleLayer,
@@ -75,11 +76,18 @@ function stageMapSpawn(
   stageId: TestSnapshot['stageId'],
   name: 'player' | 'boss',
 ): Readonly<{ x: number; y: number }> | null {
-  if (stageId !== 'dungeon') return null;
+  if (stageId === 'cemetery') return null;
   const stage = GAME_CONFIG.stages.find((candidate) => candidate.id === stageId)!;
   const layer = mapAsset(stage.mapKey).data.layers.find((candidate) => candidate.name === 'spawns');
   const spawn = layer?.objects?.find((object) => object.name === name);
   return spawn ? { x: spawn.x, y: spawn.y } : null;
+}
+
+function mapObjectProperty<T extends string | number | boolean>(
+  object: StageMapObject,
+  name: string,
+): T | undefined {
+  return object.properties?.find((property) => property.name === name)?.value as T | undefined;
 }
 const GHOST_ARROW_CONFIG = ghostArrowConfig();
 const ARROW_ASSET_KEY = GHOST_ARROW_CONFIG.assetKey;
@@ -126,6 +134,33 @@ const XP_GEM_ASSET = imageAsset('pickup-xp-gem');
 const HEAL_ASSET = imageAsset('pickup-heal');
 const TELEGRAPH_LINE_ASSET = imageAsset('vfx-telegraph-line');
 const TELEGRAPH_CIRCLE_ASSET = imageAsset('vfx-telegraph-circle');
+const LAVA_ASSET = imageAsset('vfx-lava');
+const LAVA_ANIMATION = (() => {
+  const animation = LAVA_ASSET.animations?.find((candidate) => candidate.key === 'active');
+  if (!animation) throw new Error('vfx-lava requires an active animation');
+  return animation;
+})();
+const LAVA_ANIMATION_KEY = 'vfx-lava-active';
+
+interface FixedHazard {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly damage: number;
+  readonly tickMs: number;
+  readonly sprite: Phaser.GameObjects.Sprite;
+  nextTickAtMs: number;
+}
+
+interface TemporaryHazard {
+  readonly startedAtMs: number;
+  readonly x: number;
+  readonly y: number;
+  readonly radius: number;
+  readonly sprite: Phaser.GameObjects.Sprite;
+}
 
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
@@ -173,11 +208,18 @@ export class GameScene extends Phaser.Scene {
     string,
     { readonly firesAtMs: number; readonly target: Readonly<{ x: number; y: number }> }
   >();
+  private readonly enemyFlankTargets = new Map<
+    string,
+    Readonly<{ x: number; y: number; repathAtMs: number }>
+  >();
+  private flankRepathCount = 0;
   private guardian: Phaser.Physics.Arcade.Sprite | null = null;
   private guardianTimeline: BossAttackTimeline | null = null;
   private guardianAttackIndex = 0;
   private guardianPreviousAttackMs = 0;
   private guardianTarget = { x: 0, y: 0 };
+  private guardianAttackOrigin = { x: 0, y: 0 };
+  private guardianChargeDirection = { x: 0, y: 0 };
   private telegraph: Phaser.GameObjects.Image | null = null;
   private bossBlocker: Phaser.GameObjects.Rectangle | null = null;
   private bossBlockerStartedAt = -1;
@@ -202,6 +244,12 @@ export class GameScene extends Phaser.Scene {
   private enemyRangedShotCount = 0;
   private bossPatternShotCount = 0;
   private bossPatternStartedAt = -1;
+  private readonly fixedHazards = new Map<string, FixedHazard>();
+  private temporaryHazard: TemporaryHazard | null = null;
+  private hazardTickCount = 0;
+  private bossHazardCount = 0;
+  private bossChargeCount = 0;
+  private bossChargeStartedAt = -1;
 
   constructor() {
     super(SCENE_KEYS.game);
@@ -237,7 +285,7 @@ export class GameScene extends Phaser.Scene {
       frameHeight: DEATH_AURA_ASSET.frameHeight,
     });
     const stage = GAME_CONFIG.stages.find((candidate) => candidate.id === this.stageId)!;
-    if (stage.id === 'dungeon') {
+    if (stage.id !== 'cemetery') {
       const map = mapAsset(stage.mapKey);
       const tileset = imageAsset(stage.tilesetKey);
       this.load.tilemapTiledJSON(map.key, map.path);
@@ -266,6 +314,10 @@ export class GameScene extends Phaser.Scene {
     this.load.image('pickup-heal', HEAL_ASSET.path);
     this.load.image('vfx-telegraph-line', TELEGRAPH_LINE_ASSET.path);
     this.load.image('vfx-telegraph-circle', TELEGRAPH_CIRCLE_ASSET.path);
+    this.load.spritesheet('vfx-lava', LAVA_ASSET.path, {
+      frameWidth: LAVA_ASSET.frameWidth,
+      frameHeight: LAVA_ASSET.frameHeight,
+    });
   }
 
   create(): void {
@@ -309,11 +361,15 @@ export class GameScene extends Phaser.Scene {
     this.enemyContactAt.clear();
     this.enemyAttackAt.clear();
     this.enemyTelegraphs.clear();
+    this.enemyFlankTargets.clear();
+    this.flankRepathCount = 0;
     this.guardian?.destroy();
     this.guardian = null;
     this.guardianTimeline = null;
     this.guardianAttackIndex = 0;
     this.guardianPreviousAttackMs = 0;
+    this.guardianAttackOrigin = { x: 0, y: 0 };
+    this.guardianChargeDirection = { x: 0, y: 0 };
     this.telegraph?.destroy();
     this.telegraph = null;
     this.bossBlocker?.destroy();
@@ -342,6 +398,14 @@ export class GameScene extends Phaser.Scene {
     this.enemyRangedShotCount = 0;
     this.bossPatternShotCount = 0;
     this.bossPatternStartedAt = -1;
+    this.fixedHazards.forEach((hazard) => hazard.sprite.destroy());
+    this.fixedHazards.clear();
+    this.temporaryHazard?.sprite.destroy();
+    this.temporaryHazard = null;
+    this.hazardTickCount = 0;
+    this.bossHazardCount = 0;
+    this.bossChargeCount = 0;
+    this.bossChargeStartedAt = -1;
     this.eventsOut = new GameEventPublisher(
       this.registry.events,
       'adventure-local-1',
@@ -365,6 +429,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(1)
       .setVisible(false);
     this.createObstacles();
+    this.createHazards();
     this.configureInput();
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.selectUpgradeWithPointer, this);
 
@@ -700,7 +765,7 @@ export class GameScene extends Phaser.Scene {
   private createObstacles(): void {
     this.obstacles = this.physics.add.staticGroup();
     const placements =
-      this.stageId === 'dungeon'
+      this.stageId !== 'cemetery'
         ? (this.stageMap?.getObjectLayer(this.stageConfig.obstacleLayer)?.objects ?? []).flatMap(
             (object) =>
               typeof object.x === 'number' &&
@@ -730,9 +795,51 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.obstacles);
   }
 
+  private createHazards(): void {
+    const hazardLayer = this.stageConfig.hazardLayer;
+    if (!hazardLayer || !this.stageMap) return;
+    for (const object of this.stageMap.getObjectLayer(hazardLayer)?.objects ?? []) {
+      if (
+        typeof object.x !== 'number' ||
+        typeof object.y !== 'number' ||
+        typeof object.width !== 'number' ||
+        typeof object.height !== 'number'
+      )
+        continue;
+      const definition = object as StageMapObject;
+      const id = mapObjectProperty<string>(definition, 'hazardId') ?? object.name;
+      const damage = mapObjectProperty<number>(definition, 'damage');
+      const tickMs = mapObjectProperty<number>(definition, 'tickMs');
+      if (!id || damage === undefined || tickMs === undefined || damage <= 0 || tickMs <= 0) {
+        throw new Error(`Inferno hazard ${object.name || object.id} has invalid properties`);
+      }
+      const x = object.x + object.width / 2;
+      const y = object.y + object.height / 2;
+      const sprite = this.add
+        .sprite(x, y, 'vfx-lava')
+        .play(LAVA_ANIMATION_KEY)
+        .setDisplaySize(object.width, object.height)
+        .setDepth(0)
+        .setAlpha(0.82);
+      this.fixedHazards.set(id, {
+        id,
+        x,
+        y,
+        width: object.width,
+        height: object.height,
+        damage,
+        tickMs,
+        sprite,
+        nextTickAtMs: 0,
+      });
+    }
+  }
+
   private drawWorld(): void {
-    this.cameras.main.setBackgroundColor(this.stageId === 'dungeon' ? '#0d1020' : '#0b1113');
-    if (this.stageId === 'dungeon') {
+    this.cameras.main.setBackgroundColor(
+      this.stageId === 'inferno' ? '#1a0908' : this.stageId === 'dungeon' ? '#0d1020' : '#0b1113',
+    );
+    if (this.stageId !== 'cemetery') {
       this.stageMap = this.make.tilemap({ key: this.stageConfig.mapKey });
       const tileset = this.stageMap.addTilesetImage(
         this.stageConfig.tilesetKey,
@@ -915,8 +1022,14 @@ export class GameScene extends Phaser.Scene {
     mount.dataset.hostileProjectileCount = String(this.hostileProjectiles.size);
     mount.dataset.splitSpawnCount = String(this.splitSpawnCount);
     mount.dataset.enemyRangedShotCount = String(this.enemyRangedShotCount);
+    mount.dataset.flankRepathCount = String(this.flankRepathCount);
     mount.dataset.bossPatternShotCount = String(this.bossPatternShotCount);
     mount.dataset.bossBlockActive = String(Boolean(this.bossBlocker?.active));
+    mount.dataset.hazardCount = String(this.fixedHazards.size);
+    mount.dataset.temporaryHazardCount = String(this.temporaryHazard ? 1 : 0);
+    mount.dataset.hazardTickCount = String(this.hazardTickCount);
+    mount.dataset.bossHazardCount = String(this.bossHazardCount);
+    mount.dataset.bossChargeCount = String(this.bossChargeCount);
     for (const key of [
       'soul-blade:enemy',
       'soul-blade:boss',
@@ -1042,6 +1155,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.updateEnemies(delta);
     this.updateGuardian(delta);
+    this.updateFixedHazards();
     this.resolveProjectileHits();
     this.resolveHostileProjectileHits();
     if (this.simulationSuspended()) {
@@ -1166,6 +1280,7 @@ export class GameScene extends Phaser.Scene {
       const config = GAME_CONFIG.enemies.find((candidate) => candidate.id === enemy.enemyId)!;
       let speed = enemy.moveSpeed;
       let movementDirection = 1;
+      let movementTarget: Readonly<{ x: number; y: number }> = this.player;
       if (enemy.enemyId === 'bat') {
         if (config.behavior === 'dash') {
           const cycle = config.params.windupMs + config.params.dashMs + config.params.recoveryMs;
@@ -1179,13 +1294,52 @@ export class GameScene extends Phaser.Scene {
           sprite.setAlpha(elapsed < config.params.windupMs ? 0.65 : 1);
         }
       }
-      const distance = Phaser.Math.Distance.Between(
+      const playerDistance = Phaser.Math.Distance.Between(
         sprite.x,
         sprite.y,
         this.player.x,
         this.player.y,
       );
-      if (config.behavior === 'kite-ranged') {
+      if (config.behavior === 'flank') {
+        const previous = this.enemyFlankTargets.get(enemy.entityId);
+        if (!previous || this.simulationTimeMs >= previous.repathAtMs) {
+          const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
+          const velocityLength = playerBody.velocity.length();
+          const forward =
+            velocityLength > 0.001
+              ? {
+                  x: playerBody.velocity.x / velocityLength,
+                  y: playerBody.velocity.y / velocityLength,
+                }
+              : {
+                  x: (this.player.x - sprite.x) / Math.max(playerDistance, 0.001),
+                  y: (this.player.y - sprite.y) / Math.max(playerDistance, 0.001),
+                };
+          const entityNumber = Number(enemy.entityId.split(':').at(-1)) || 0;
+          const side = entityNumber % 2 === 0 ? 1 : -1;
+          const target = {
+            x: Phaser.Math.Clamp(
+              this.player.x +
+                forward.x * config.params.leadDistance -
+                forward.y * config.params.leadDistance * 0.65 * side,
+              this.stageConfig.bounds.x + enemy.radius,
+              this.stageConfig.bounds.x + this.stageConfig.bounds.width - enemy.radius,
+            ),
+            y: Phaser.Math.Clamp(
+              this.player.y +
+                forward.y * config.params.leadDistance +
+                forward.x * config.params.leadDistance * 0.65 * side,
+              this.stageConfig.bounds.y + enemy.radius,
+              this.stageConfig.bounds.y + this.stageConfig.bounds.height - enemy.radius,
+            ),
+            repathAtMs: this.simulationTimeMs + config.params.repathMs,
+          };
+          this.enemyFlankTargets.set(enemy.entityId, target);
+          this.flankRepathCount += 1;
+          movementTarget = target;
+        } else movementTarget = previous;
+      }
+      if (config.behavior === 'kite-ranged' || config.behavior === 'ranged') {
         const telegraph = this.enemyTelegraphs.get(enemy.entityId);
         if (telegraph && this.simulationTimeMs >= telegraph.firesAtMs) {
           this.fireHostilePattern(
@@ -1214,22 +1368,29 @@ export class GameScene extends Phaser.Scene {
           });
           sprite.setTint(0x55c9d3);
         }
-        if (distance < config.params.retreatDistance) movementDirection = -1;
-        else if (distance <= config.params.preferredDistance) speed = 0;
+        if (config.behavior === 'kite-ranged' && playerDistance < config.params.retreatDistance)
+          movementDirection = -1;
+        else if (playerDistance <= config.params.preferredDistance) speed = 0;
       }
-      if (distance > 0.001 && speed > 0) {
-        const step = Math.min(distance, speed * (delta / 1000)) * movementDirection;
+      const movementDistance = Phaser.Math.Distance.Between(
+        sprite.x,
+        sprite.y,
+        movementTarget.x,
+        movementTarget.y,
+      );
+      if (movementDistance > 0.001 && speed > 0) {
+        const step = Math.min(movementDistance, speed * (delta / 1000)) * movementDirection;
         const position = this.moveActorAgainstObstacles(
           sprite,
-          ((this.player.x - sprite.x) / distance) * step,
-          ((this.player.y - sprite.y) / distance) * step,
+          ((movementTarget.x - sprite.x) / movementDistance) * step,
+          ((movementTarget.y - sprite.y) / movementDistance) * step,
           enemy.radius,
         );
         sprite.setPosition(position.x, position.y);
         sprite.setFlipX(this.player.x < sprite.x);
       }
       if (
-        distance <= enemy.radius + 8 &&
+        playerDistance <= enemy.radius + 8 &&
         (this.enemyContactAt.get(enemy.entityId) ?? 0) <= this.simulationTimeMs
       ) {
         this.enemyContactAt.set(enemy.entityId, this.simulationTimeMs + 500);
@@ -1401,6 +1562,9 @@ export class GameScene extends Phaser.Scene {
     sprite?.destroy();
     this.enemySprites.delete(enemy.entityId);
     this.enemyContactAt.delete(enemy.entityId);
+    this.enemyAttackAt.delete(enemy.entityId);
+    this.enemyTelegraphs.delete(enemy.entityId);
+    this.enemyFlankTargets.delete(enemy.entityId);
     this.kills += 1;
     this.killsByEnemyId.set(enemy.enemyId, (this.killsByEnemyId.get(enemy.enemyId) ?? 0) + 1);
     this.awardEnemyDefeat(enemy.entityId, enemy.enemyId, enemy.elite, x, y);
@@ -1434,6 +1598,20 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private updateFixedHazards(): void {
+    const centerX = this.player.x + PLAYER_COLLISION.offsetX;
+    const centerY = this.player.y + PLAYER_COLLISION.offsetY;
+    for (const hazard of this.fixedHazards.values()) {
+      const touching =
+        Math.abs(centerX - hazard.x) <= hazard.width / 2 + PLAYER_COLLISION_RADIUS &&
+        Math.abs(centerY - hazard.y) <= hazard.height / 2 + PLAYER_COLLISION_RADIUS;
+      if (!touching || this.simulationTimeMs < hazard.nextTickAtMs) continue;
+      hazard.nextTickAtMs = this.simulationTimeMs + hazard.tickMs;
+      this.hazardTickCount += 1;
+      this.damagePlayer(hazard.damage, hazard.id);
+    }
+  }
+
   private spawnGuardian(): void {
     this.upgradeFlow.enterBaseState('boss-fight');
     const mapSpawn = stageMapSpawn(this.stageId, 'boss');
@@ -1443,7 +1621,7 @@ export class GameScene extends Phaser.Scene {
       .sprite(spawnX, spawnY, this.bossConfig.assetKey, 0)
       .setDepth(3)
       .setScale(1.35)
-      .setTint(0xc8d4b8);
+      .setTint(this.stageId === 'inferno' ? 0xffa04d : 0xc8d4b8);
     this.guardian.setCollideWorldBounds(true);
     const safeUntilMs = this.bossSafety.begin(this.simulationTimeMs, this.bossConfig.safeEntryMs);
     this.eventsOut.emit('boss:spawned', { bossId: this.bossConfig.id, safeUntilMs });
@@ -1454,6 +1632,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private startGuardianAttack(attack: BossAttack): void {
+    if (!this.guardian) return;
     const phase = this.stageDirector.boss?.phase ?? 1;
     this.guardianTimeline = new BossAttackTimeline(
       attack,
@@ -1462,9 +1641,22 @@ export class GameScene extends Phaser.Scene {
     );
     this.guardianPreviousAttackMs = this.simulationTimeMs;
     this.guardianTarget = { x: this.player.x, y: this.player.y };
+    this.guardianAttackOrigin = { x: this.guardian.x, y: this.guardian.y };
+    const chargeDistance = Phaser.Math.Distance.Between(
+      this.guardian.x,
+      this.guardian.y,
+      this.guardianTarget.x,
+      this.guardianTarget.y,
+    );
+    this.guardianChargeDirection =
+      chargeDistance > 0.001
+        ? {
+            x: (this.guardianTarget.x - this.guardian.x) / chargeDistance,
+            y: (this.guardianTarget.y - this.guardian.y) / chargeDistance,
+          }
+        : { x: 1, y: 0 };
     this.telegraph?.destroy();
-    if (!this.guardian) return;
-    if (attack.kind === 'line' || attack.kind === 'fan') {
+    if (attack.kind === 'line' || attack.kind === 'fan' || attack.kind === 'charge') {
       const angle = Phaser.Math.Angle.Between(
         this.guardian.x,
         this.guardian.y,
@@ -1476,8 +1668,12 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0, 0.5)
         .setRotation(angle)
         .setDisplaySize(
-          attack.kind === 'line' ? attack.length : 180,
-          attack.kind === 'line' ? attack.width : 80,
+          attack.kind === 'line' ? attack.length : attack.kind === 'charge' ? attack.distance : 180,
+          attack.kind === 'line'
+            ? attack.width
+            : attack.kind === 'charge'
+              ? this.bossConfig.radius * 2
+              : 80,
         )
         .setDepth(1)
         .setAlpha(0.75);
@@ -1489,7 +1685,11 @@ export class GameScene extends Phaser.Scene {
         .setAlpha(0.75);
     } else {
       const radius =
-        attack.kind === 'slam' ? attack.radius : attack.kind === 'summon' ? attack.spawnRadius : 80;
+        attack.kind === 'slam' || attack.kind === 'hazard'
+          ? attack.radius
+          : attack.kind === 'summon'
+            ? attack.spawnRadius
+            : 80;
       const center =
         attack.kind === 'summon' || attack.kind === 'ring' ? this.guardian : this.guardianTarget;
       this.telegraph = this.add
@@ -1530,6 +1730,39 @@ export class GameScene extends Phaser.Scene {
       this.bossBlocker?.destroy();
       this.bossBlocker = null;
     }
+    if (
+      timeline.attack.kind === 'hazard' &&
+      state === 'active' &&
+      this.temporaryHazard?.startedAtMs !== timeline.telegraphStartedAtMs
+    ) {
+      this.temporaryHazard?.sprite.destroy();
+      const sprite = this.add
+        .sprite(this.guardianTarget.x, this.guardianTarget.y, 'vfx-lava')
+        .play(LAVA_ANIMATION_KEY)
+        .setDisplaySize(timeline.attack.radius * 2, timeline.attack.radius * 2)
+        .setDepth(1)
+        .setAlpha(0.88);
+      this.temporaryHazard = {
+        startedAtMs: timeline.telegraphStartedAtMs,
+        x: this.guardianTarget.x,
+        y: this.guardianTarget.y,
+        radius: timeline.attack.radius,
+        sprite,
+      };
+      this.bossHazardCount += 1;
+    } else if (timeline.attack.kind !== 'hazard' || state !== 'active') {
+      this.temporaryHazard?.sprite.destroy();
+      this.temporaryHazard = null;
+    }
+
+    if (
+      timeline.attack.kind === 'charge' &&
+      state === 'active' &&
+      this.bossChargeStartedAt !== timeline.telegraphStartedAtMs
+    ) {
+      this.bossChargeStartedAt = timeline.telegraphStartedAtMs;
+      this.bossChargeCount += 1;
+    }
 
     const distance = Phaser.Math.Distance.Between(
       this.guardian.x,
@@ -1537,7 +1770,29 @@ export class GameScene extends Phaser.Scene {
       this.player.x,
       this.player.y,
     );
-    if (state !== 'telegraph' && distance > this.bossConfig.radius + 7) {
+    if (timeline.attack.kind === 'charge' && state === 'active') {
+      const distanceCharged = Phaser.Math.Distance.Between(
+        this.guardianAttackOrigin.x,
+        this.guardianAttackOrigin.y,
+        this.guardian.x,
+        this.guardian.y,
+      );
+      const step = Math.min(
+        Math.max(0, timeline.attack.distance - distanceCharged),
+        timeline.attack.speed * (delta / 1000),
+      );
+      const position = this.moveActorAgainstObstacles(
+        this.guardian,
+        this.guardianChargeDirection.x * step,
+        this.guardianChargeDirection.y * step,
+        this.bossConfig.radius,
+      );
+      this.guardian.setPosition(position.x, position.y);
+    } else if (
+      timeline.attack.kind !== 'charge' &&
+      state !== 'telegraph' &&
+      distance > this.bossConfig.radius + 7
+    ) {
       const step = Math.min(distance, this.bossConfig.moveSpeed * (delta / 1000));
       const position = this.moveActorAgainstObstacles(
         this.guardian,
@@ -1554,6 +1809,7 @@ export class GameScene extends Phaser.Scene {
       this.player.y,
     );
     if (
+      !(timeline.attack.kind === 'charge' && state === 'active') &&
       contactDistance <= this.bossConfig.radius + 8 &&
       this.simulationTimeMs >= this.guardianContactAt
     ) {
@@ -1562,12 +1818,22 @@ export class GameScene extends Phaser.Scene {
         this.guardianContactAt = this.simulationTimeMs + GAME_CONFIG.player.contactDamageCooldownMs;
       }
     }
+    if (
+      timeline.attack.kind === 'charge' &&
+      state === 'active' &&
+      contactDistance <= this.bossConfig.radius + 8 &&
+      !this.bossDamageMoments.has(timeline.telegraphStartedAtMs)
+    ) {
+      this.bossDamageMoments.add(timeline.telegraphStartedAtMs);
+      this.damagePlayerFromBoss(timeline.attack.damage, this.bossConfig.id);
+    }
     for (const moment of timeline.damageMomentsBetween(
       this.guardianPreviousAttackMs,
       this.simulationTimeMs,
     )) {
       if (this.bossDamageMoments.has(moment)) continue;
       this.bossDamageMoments.add(moment);
+      if (timeline.attack.kind === 'hazard') this.hazardTickCount += 1;
       if (this.guardianAttackHitsPlayer(timeline.attack)) {
         this.damagePlayerFromBoss(timeline.attack.damage, this.bossConfig.id);
       }
@@ -1645,6 +1911,17 @@ export class GameScene extends Phaser.Scene {
         Math.abs(this.player.y - this.guardianTarget.y) <= attack.height / 2 + 7
       );
     }
+    if (attack.kind === 'hazard' && this.temporaryHazard) {
+      const playerCollisionCenter = {
+        x: this.player.x + PLAYER_COLLISION.offsetX,
+        y: this.player.y + PLAYER_COLLISION.offsetY,
+      };
+      return circleContains(
+        this.temporaryHazard,
+        playerCollisionCenter,
+        this.temporaryHazard.radius + PLAYER_COLLISION_RADIUS,
+      );
+    }
     return false;
   }
 
@@ -1689,11 +1966,16 @@ export class GameScene extends Phaser.Scene {
     this.enemyContactAt.clear();
     this.enemyAttackAt.clear();
     this.enemyTelegraphs.clear();
+    this.enemyFlankTargets.clear();
     for (const arrow of this.arrows.values()) arrow.destroy();
     this.arrows.clear();
     for (const projectile of this.hostileProjectiles.values()) projectile.destroy();
     this.hostileProjectiles.clear();
     this.projectileBudget.clear();
+    for (const hazard of this.fixedHazards.values()) hazard.sprite.destroy();
+    this.fixedHazards.clear();
+    this.temporaryHazard?.sprite.destroy();
+    this.temporaryHazard = null;
     for (const pickup of this.healPickups.values()) pickup.destroy();
     this.healPickups.clear();
     this.soulBlades.splice(0).forEach((blade) => blade.destroy());
@@ -1933,6 +2215,14 @@ export class GameScene extends Phaser.Scene {
       );
       this.createAnimation(`player-death-${direction}`, [first + 5, first + 8], 6, 0);
     });
+    if (!this.anims.exists(LAVA_ANIMATION_KEY)) {
+      this.anims.create({
+        key: LAVA_ANIMATION_KEY,
+        frames: LAVA_ANIMATION.frames.map((frame) => ({ key: 'vfx-lava', frame })),
+        frameRate: LAVA_ANIMATION.frameRate,
+        repeat: LAVA_ANIMATION.repeat,
+      });
+    }
   }
 
   private createAnimation(key: string, frames: number[], frameRate: number, repeat: number): void {
