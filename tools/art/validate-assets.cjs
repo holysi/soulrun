@@ -211,7 +211,8 @@ async function validateImage(asset, palettes) {
       .join('');
     expect(approved.has(rgb), `${asset.key}: color #${rgb} is outside ${asset.paletteId}`);
   }
-  expect(transparent > 0, `${asset.key}: lacks transparent pixels`);
+  // Lava is stretched to authored hazard bounds, so an opaque frame prevents invisible damage strips.
+  if (asset.key !== 'vfx-lava') expect(transparent > 0, `${asset.key}: lacks transparent pixels`);
   const frameCount = (asset.width / asset.frameWidth) * (asset.height / asset.frameHeight);
   for (const animation of asset.animations || []) {
     expect(animation.frameRate > 0, `${asset.key}/${animation.key}: invalid frame rate`);

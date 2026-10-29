@@ -181,6 +181,7 @@ async function lavaVfx() {
   const parts = [];
   for (let frame = 0; frame < 4; frame += 1) {
     const x = frame * 16;
+    parts.push(rect(x, 0, 16, 16, palette[3]));
     parts.push(rect(x + 1, 5, 14, 10, palette[4]));
     parts.push(rect(x + 2, 7 + (frame % 2), 12, 5, palette[5]));
     parts.push(rect(x + 4 + frame, 4, 4, 5, palette[6]));
