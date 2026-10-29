@@ -1809,7 +1809,7 @@ export class GameScene extends Phaser.Scene {
       this.player.y,
     );
     if (
-      timeline.attack.kind !== 'charge' &&
+      !(timeline.attack.kind === 'charge' && state === 'active') &&
       contactDistance <= this.bossConfig.radius + 8 &&
       this.simulationTimeMs >= this.guardianContactAt
     ) {
@@ -1912,7 +1912,15 @@ export class GameScene extends Phaser.Scene {
       );
     }
     if (attack.kind === 'hazard' && this.temporaryHazard) {
-      return circleContains(this.temporaryHazard, this.player, this.temporaryHazard.radius + 7);
+      const playerCollisionCenter = {
+        x: this.player.x + PLAYER_COLLISION.offsetX,
+        y: this.player.y + PLAYER_COLLISION.offsetY,
+      };
+      return circleContains(
+        this.temporaryHazard,
+        playerCollisionCenter,
+        this.temporaryHazard.radius + PLAYER_COLLISION_RADIUS,
+      );
     }
     return false;
   }

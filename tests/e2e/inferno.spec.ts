@@ -121,6 +121,51 @@ test('runs the Flame Demon charge, temporary lava, ring, and phase two', async (
   );
 });
 
+test('uses the authored player collision circle at temporary lava edges', async ({ page }) => {
+  await page.goto('/?test=1&seed=inferno-boss-lava-edge-001');
+  await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
+    await api.ready();
+    await api.startAdventure({ seed: 'inferno-boss-lava-edge-001', stageId: 'inferno' });
+    await api.forceBoss();
+    await api.advance(6200);
+    api.input('down', true);
+    await api.advance(720);
+    api.input('down', false);
+    await api.advance(100);
+  });
+
+  const snapshot = await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot());
+  expect(snapshot).toMatchObject({ state: 'boss-fight', stageId: 'inferno' });
+  expect(snapshot?.player.health).toBeLessThan(snapshot?.player.maxHealth ?? 0);
+  await expect(page.locator('[data-testid="game-root"]')).toHaveAttribute(
+    'data-temporary-hazard-count',
+    '1',
+  );
+});
+
+test('restores Flame Demon contact damage after the active charge', async ({ page }) => {
+  await page.goto('/?test=1&seed=inferno-charge-contact-001');
+  await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
+  await page.evaluate(async () => {
+    const api = window.__SOULRUN_TEST__;
+    if (!api) throw new Error('Missing test API');
+    await api.ready();
+    await api.startAdventure({ seed: 'inferno-charge-contact-001', stageId: 'inferno' });
+    await api.forceBoss();
+    await api.advance(2200);
+    api.input('up', true);
+    await api.advance(900);
+    api.input('up', false);
+  });
+
+  const snapshot = await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot());
+  expect(snapshot).toMatchObject({ state: 'boss-fight', stageId: 'inferno' });
+  expect(snapshot?.player.health).toBeLessThan(snapshot?.player.maxHealth ?? 0);
+});
+
 test('defeats the Flame Demon and hands Inferno back to Cemetery', async ({ page }) => {
   await page.goto('/?test=1&seed=inferno-handoff-001');
   await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
