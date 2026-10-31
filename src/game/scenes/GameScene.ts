@@ -174,6 +174,10 @@ export class GameScene extends Phaser.Scene {
   private aimDirection: AimDirection = 'e';
   private aimVector = { x: 1, y: 0 };
   private simulationTimeMs = 0;
+  private stageTimeMs = 0;
+  private completedLoops = 0;
+  private continuingAdventure = false;
+  private stageScoreStart = 0;
   private nextAttackAtMs = 0;
   private paused = false;
   private attackId = 0;
@@ -201,6 +205,8 @@ export class GameScene extends Phaser.Scene {
   private bladeOrbitAngle = 0;
   private secondaryAttackId = 0;
   private stageDirector!: StageDirector;
+  private spawnRandom!: RandomSource;
+  private enemyEntityId = 0;
   private readonly enemySprites = new Map<string, Phaser.Physics.Arcade.Sprite>();
   private readonly enemyContactAt = new Map<string, number>();
   private readonly enemyAttackAt = new Map<string, number>();
@@ -259,10 +265,14 @@ export class GameScene extends Phaser.Scene {
     seed?: string;
     stageId?: TestSnapshot['stageId'];
     testControlled?: boolean;
+    completedLoops?: number;
+    continuingAdventure?: boolean;
   }): void {
     this.seed = data?.seed ?? '';
     this.stageId = data?.stageId ?? 'cemetery';
     this.testControlled = data?.testControlled ?? false;
+    this.completedLoops = data?.completedLoops ?? 0;
+    this.continuingAdventure = data?.continuingAdventure ?? false;
   }
 
   private get stageConfig() {
@@ -321,40 +331,50 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.model = new PlayerModel(PLAYER_CONFIG);
+    if (!this.continuingAdventure) this.model = new PlayerModel(PLAYER_CONFIG);
     this.bossSafety = new BossSafetyWindow();
     this.aimDirection = 'e';
     this.aimVector = { x: 1, y: 0 };
-    this.simulationTimeMs = 0;
+    if (!this.continuingAdventure) this.simulationTimeMs = 0;
+    this.stageTimeMs = 0;
     this.nextAttackAtMs = 0;
     this.paused = false;
-    this.attackId = 0;
+    if (!this.continuingAdventure) this.attackId = 0;
     this.arrows.clear();
     this.hostileProjectiles.clear();
-    this.hostileProjectileId = 0;
+    if (!this.continuingAdventure) this.hostileProjectileId = 0;
     this.projectileBudget.clear();
     this.testInputs.clear();
     this.testAim = null;
     this.testRemainderMs = 0;
     this.boss = null;
     this.stageMap = null;
-    this.progression = new ProgressionModel(
-      GAME_CONFIG,
-      createGameplayStreams(this.seed || 'local-adventure').upgrade,
-    );
+    if (!this.continuingAdventure) {
+      this.progression = new ProgressionModel(
+        GAME_CONFIG,
+        createGameplayStreams(this.seed || 'local-adventure').upgrade,
+      );
+    }
     this.upgradeFlow.reset();
-    this.score = new ScoreModel(GAME_CONFIG);
-    this.xpEntityId = 0;
+    if (!this.continuingAdventure) this.score = new ScoreModel(GAME_CONFIG);
+    if (!this.continuingAdventure) this.xpEntityId = 0;
     this.xpGems.clear();
     this.soulBlades.splice(0).forEach((blade) => blade.destroy());
     this.nextAuraAtMs = 0;
     this.bladeOrbitAngle = 0;
-    this.secondaryAttackId = 0;
+    if (!this.continuingAdventure) this.secondaryAttackId = 0;
+    if (!this.continuingAdventure) {
+      this.spawnRandom = createGameplayStreams(this.seed || 'local-adventure').spawn;
+      this.enemyEntityId = 0;
+    }
+    this.stageScoreStart = this.score.score;
     this.stageDirector = new StageDirector(
       this.stageId,
       this.seed || 'local-adventure',
-      0,
+      this.completedLoops,
       stageObstacleRects(this.stageId),
+      this.spawnRandom,
+      this.enemyEntityId,
     );
     this.enemySprites.forEach((sprite) => sprite.destroy());
     this.enemySprites.clear();
@@ -379,12 +399,14 @@ export class GameScene extends Phaser.Scene {
     this.xpGemSprites.clear();
     this.healPickups.forEach((sprite) => sprite.destroy());
     this.healPickups.clear();
-    this.healPickupId = 0;
+    if (!this.continuingAdventure) this.healPickupId = 0;
     this.kills = 0;
-    this.killsByEnemyId.clear();
+    if (!this.continuingAdventure) this.killsByEnemyId.clear();
     this.damageTaken = 0;
     this.stageCompleted = false;
-    this.lootRandom = createGameplayStreams(this.seed || 'local-adventure').loot;
+    if (!this.continuingAdventure) {
+      this.lootRandom = createGameplayStreams(this.seed || 'local-adventure').loot;
+    }
     this.lastTimerSecond = -1;
     this.lastPressureStep = -1;
     this.bossDamageMoments.clear();
@@ -406,20 +428,22 @@ export class GameScene extends Phaser.Scene {
     this.bossHazardCount = 0;
     this.bossChargeCount = 0;
     this.bossChargeStartedAt = -1;
-    this.eventsOut = new GameEventPublisher(
-      this.registry.events,
-      'adventure-local-1',
-      () => this.simulationTimeMs,
-    );
-    this.eventsOut.emit('adventure:started', {
-      seed: this.seed || 'local-adventure',
-      adventureId: 'adventure-local-1',
-    });
-    this.eventsOut.emit('stage:loading', {
-      stageId: this.stageId,
-      stageIndex: this.stageConfig.order,
-      completedLoops: 0,
-    });
+    if (!this.continuingAdventure) {
+      this.eventsOut = new GameEventPublisher(
+        this.registry.events,
+        'adventure-local-1',
+        () => this.simulationTimeMs,
+      );
+      this.eventsOut.emit('adventure:started', {
+        seed: this.seed || 'local-adventure',
+        adventureId: 'adventure-local-1',
+      });
+      this.eventsOut.emit('stage:loading', {
+        stageId: this.stageId,
+        stageIndex: this.stageConfig.order,
+        completedLoops: this.completedLoops,
+      });
+    }
     this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.drawWorld();
     this.createAnimations();
@@ -428,6 +452,7 @@ export class GameScene extends Phaser.Scene {
       .image(this.player.x, this.player.y, DEATH_AURA_CONFIG.assetKey)
       .setDepth(1)
       .setVisible(false);
+    this.syncSecondaryWeapons();
     this.createObstacles();
     this.createHazards();
     this.configureInput();
@@ -436,17 +461,17 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     this.cameras.main.setRoundPixels(true);
-    this.scene.launch(SCENE_KEYS.overlay);
+    if (!this.scene.isActive(SCENE_KEYS.overlay)) this.scene.launch(SCENE_KEYS.overlay);
     this.eventsOut.emit('player:health-changed', {
       current: this.model.health,
       maximum: this.model.maxHealth,
       delta: 0,
-      sourceId: 'adventure-start',
+      sourceId: this.continuingAdventure ? 'stage-start' : 'adventure-start',
     });
     this.eventsOut.emit('stage:started', {
       stageId: this.stageId,
       stageIndex: this.stageConfig.order,
-      completedLoops: 0,
+      completedLoops: this.completedLoops,
     });
     this.reflectState();
 
@@ -454,7 +479,6 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off(Phaser.Core.Events.BLUR, this.pauseForBlur, this);
       this.input.off(Phaser.Input.Events.POINTER_DOWN, this.selectUpgradeWithPointer, this);
-      this.scene.stop(SCENE_KEYS.overlay);
     });
     this.syncPhysicsPause();
   }
@@ -510,7 +534,7 @@ export class GameScene extends Phaser.Scene {
 
   forceBossForTest(): void {
     if (this.model.dead) throw new Error('Boss can only be forced during play');
-    const event = this.stageDirector.forceBoss(this.simulationTimeMs);
+    const event = this.stageDirector.forceBoss(this.stageTimeMs);
     if (event) this.handleStageEvent(event);
     this.reflectState();
   }
@@ -566,7 +590,7 @@ export class GameScene extends Phaser.Scene {
     elite: boolean,
     x: number,
     y: number,
-    completedLoops = 0,
+    completedLoops = this.completedLoops,
   ): string {
     const { score: scoreAwarded, xp } = this.score.awardEnemy(enemyId, elite, completedLoops);
     const gemId = this.spawnXpGem(xp, x, y);
@@ -585,7 +609,10 @@ export class GameScene extends Phaser.Scene {
     return gemId;
   }
 
-  awardBossDefeat(bossId: (typeof GAME_CONFIG.bosses)[number]['id'], completedLoops = 0): number {
+  awardBossDefeat(
+    bossId: (typeof GAME_CONFIG.bosses)[number]['id'],
+    completedLoops = this.completedLoops,
+  ): number {
     const boss = GAME_CONFIG.bosses.find((candidate) => candidate.id === bossId);
     if (!boss) throw new Error(`Unknown Boss ${bossId}`);
     const scoreAwarded = this.score.awardBoss(bossId, completedLoops);
@@ -637,8 +664,8 @@ export class GameScene extends Phaser.Scene {
       seed: this.seed,
       simulationTimeMs: this.simulationTimeMs,
       stageId: this.stageId,
-      stageTimeMs: this.simulationTimeMs,
-      completedLoops: 0,
+      stageTimeMs: this.stageTimeMs,
+      completedLoops: this.completedLoops,
       player: {
         x: this.player.x,
         y: this.player.y,
@@ -696,7 +723,7 @@ export class GameScene extends Phaser.Scene {
     publishPlayerDamage(this.eventsOut, result, this.model.health, this.model.maxHealth, sourceId, {
       score: this.score.score,
       level: progression.level,
-      completedLoops: 0,
+      completedLoops: this.completedLoops,
       survivalTimeMs: this.simulationTimeMs,
       killsByEnemyId: Object.fromEntries(this.killsByEnemyId),
     });
@@ -747,7 +774,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createPlayer(): void {
-    this.player = this.physics.add.sprite(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, PLAYER_ASSET_KEY, 0);
+    const spawn = stageMapSpawn(this.stageId, 'player') ?? {
+      x: WORLD_WIDTH / 2,
+      y: WORLD_HEIGHT / 2,
+    };
+    this.player = this.physics.add.sprite(spawn.x, spawn.y, PLAYER_ASSET_KEY, 0);
     this.player.setOrigin(PLAYER_ASSET.anchor.x, PLAYER_ASSET.anchor.y).setCollideWorldBounds(true);
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     body.setCircle(
@@ -1119,6 +1150,7 @@ export class GameScene extends Phaser.Scene {
 
   private runSimulation(delta: number, manuallyIntegrateMovement: boolean): void {
     this.simulationTimeMs += delta;
+    this.stageTimeMs += delta;
     this.updateStageDirector();
     this.updateAim();
     this.updateMovement();
@@ -1184,7 +1216,7 @@ export class GameScene extends Phaser.Scene {
     if (this.stageCompleted || !['playing', 'boss-fight'].includes(this.upgradeFlow.baseState))
       return;
     const camera = this.cameras.main.worldView;
-    for (const event of this.stageDirector.drainThrough(this.simulationTimeMs, this.player, {
+    for (const event of this.stageDirector.drainThrough(this.stageTimeMs, this.player, {
       x: camera.x,
       y: camera.y,
       width: camera.width,
@@ -1192,15 +1224,15 @@ export class GameScene extends Phaser.Scene {
     })) {
       this.handleStageEvent(event);
     }
-    const second = Math.floor(this.simulationTimeMs / 1000);
+    const second = Math.floor(this.stageTimeMs / 1000);
     if (second !== this.lastTimerSecond) {
       this.lastTimerSecond = second;
       this.eventsOut.emit('stage:timer-changed', {
-        remainingMs: Math.max(0, this.stageConfig.durationMs - this.simulationTimeMs),
+        remainingMs: Math.max(0, this.stageConfig.durationMs - this.stageTimeMs),
       });
     }
     const pressureStep = this.stageConfig.pressureSchedule.reduce(
-      (result, step, index) => (step.atMs <= this.simulationTimeMs ? index : result),
+      (result, step, index) => (step.atMs <= this.stageTimeMs ? index : result),
       0,
     );
     if (pressureStep !== this.lastPressureStep) {
@@ -1284,7 +1316,7 @@ export class GameScene extends Phaser.Scene {
       if (enemy.enemyId === 'bat') {
         if (config.behavior === 'dash') {
           const cycle = config.params.windupMs + config.params.dashMs + config.params.recoveryMs;
-          const elapsed = (this.simulationTimeMs - enemy.spawnedAtMs) % cycle;
+          const elapsed = (this.stageTimeMs - enemy.spawnedAtMs) % cycle;
           speed =
             elapsed < config.params.windupMs
               ? 0
@@ -1576,7 +1608,7 @@ export class GameScene extends Phaser.Scene {
         config.params.childCount,
         { x, y },
         18,
-        this.simulationTimeMs,
+        this.stageTimeMs,
       );
       this.splitSpawnCount += children.length;
       for (const event of children) this.handleStageEvent(event);
@@ -1989,10 +2021,10 @@ export class GameScene extends Phaser.Scene {
     this.upgradeFlow.enterBaseState('stage-summary');
     this.eventsOut.emit('stage:completed', {
       stageId: this.stageConfig.id,
-      elapsedMs: this.simulationTimeMs,
+      elapsedMs: this.stageTimeMs,
       kills: this.kills,
       damageTaken: this.damageTaken,
-      scoreEarned: this.score.score,
+      scoreEarned: this.score.score - this.stageScoreStart,
     });
     this.healPlayer(this.model.maxHealth * GAME_CONFIG.player.postBossHealRatio);
     const offer = this.progression.offerBossUpgrade();
@@ -2004,11 +2036,24 @@ export class GameScene extends Phaser.Scene {
     this.upgradeFlow.enterBaseState('loading-stage');
     const nextOrder = (this.stageConfig.order + 1) % GAME_CONFIG.stages.length;
     const nextStage = GAME_CONFIG.stages.find((candidate) => candidate.order === nextOrder)!;
+    this.enemyEntityId = this.stageDirector.currentEntityCounter;
+    if (nextOrder === 0) {
+      this.completedLoops += 1;
+      this.eventsOut.emit('loop:completed', { completedLoops: this.completedLoops });
+    }
     this.stageId = nextStage.id;
     this.eventsOut.emit('stage:loading', {
       stageId: nextStage.id,
       stageIndex: nextStage.order,
-      completedLoops: 0,
+      completedLoops: this.completedLoops,
+    });
+    this.reflectState();
+    this.scene.restart({
+      seed: this.seed,
+      stageId: nextStage.id,
+      testControlled: this.testControlled,
+      completedLoops: this.completedLoops,
+      continuingAdventure: true,
     });
   }
 

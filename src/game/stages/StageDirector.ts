@@ -8,6 +8,7 @@ import {
 } from '../content';
 import type { BossConfig, EnemyConfig, Point, Rect, StageConfig } from '../content';
 import { createGameplayStreams } from '../random/RandomSource';
+import type { RandomSource } from '../random/RandomSource';
 
 export interface StageEnemyState {
   readonly entityId: string;
@@ -43,10 +44,10 @@ export class StageDirector {
   readonly stage: StageConfig;
   readonly bossConfig: BossConfig;
   private readonly scheduler: WaveScheduler;
-  private readonly spawnRandom;
+  private readonly spawnRandom: RandomSource;
   private readonly capEscalation;
   private readonly enemies = new Map<string, StageEnemyState>();
-  private entityCounter = 0;
+  private entityCounter: number;
   private bossValue: StageBossState | null = null;
 
   constructor(
@@ -54,6 +55,8 @@ export class StageDirector {
     seed: string,
     private readonly completedLoops = 0,
     private readonly spawnExclusionRects: readonly Rect[] = [],
+    spawnRandom?: RandomSource,
+    initialEntityCounter = 0,
   ) {
     const stage = GAME_CONFIG.stages.find((candidate) => candidate.id === stageId);
     if (!stage) throw new Error(`Unknown stage ${stageId}`);
@@ -62,7 +65,8 @@ export class StageDirector {
     this.stage = stage;
     this.bossConfig = boss;
     this.scheduler = new WaveScheduler(stage, completedLoops);
-    this.spawnRandom = createGameplayStreams(seed).spawn;
+    this.spawnRandom = spawnRandom ?? createGameplayStreams(seed).spawn;
+    this.entityCounter = initialEntityCounter;
     this.capEscalation = new CapEscalation(stage.capEscalation);
   }
 
@@ -78,6 +82,10 @@ export class StageDirector {
 
   get pressureStacks(): number {
     return this.capEscalation.stacks;
+  }
+
+  get currentEntityCounter(): number {
+    return this.entityCounter;
   }
 
   drainThrough(

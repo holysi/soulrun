@@ -79,8 +79,12 @@ export class LiveGameTestAdapter implements SoulrunTestApi {
   }
 
   async chooseUpgrade(index: 0 | 1 | 2): Promise<void> {
-    this.scene().chooseUpgradeForTest(index);
-    await Promise.resolve();
+    const scene = this.scene();
+    const before = scene.snapshotForTest();
+    const transitionsStage = before.activeUpgradeOffer?.source === 'boss';
+    scene.chooseUpgradeForTest(index);
+    if (transitionsStage) await this.waitForStageTransition(before.stageId, before.eventSequence);
+    else await Promise.resolve();
   }
 
   async spawnXpGem(options: { value: number; x: number; y: number }): Promise<string> {
@@ -151,6 +155,31 @@ export class LiveGameTestAdapter implements SoulrunTestApi {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
     throw new Error('GameScene did not become ready');
+  }
+
+  private async waitForStageTransition(
+    previousStageId: TestSnapshot['stageId'],
+    previousSequence: number,
+  ): Promise<void> {
+    for (let attempts = 0; attempts < 120; attempts += 1) {
+      const scene = this.game.scene.getScene(SCENE_KEYS.game);
+      if (scene instanceof GameScene && scene.scene.isActive()) {
+        try {
+          const snapshot = scene.snapshotForTest();
+          if (
+            snapshot.stageId !== previousStageId &&
+            snapshot.state === 'playing' &&
+            snapshot.eventSequence > previousSequence
+          ) {
+            return;
+          }
+        } catch {
+          // The restarted scene may be active before create has finished.
+        }
+      }
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    throw new Error('Stage transition did not become ready');
   }
 
   private clearStorage(): void {
