@@ -55,7 +55,7 @@ test('runs the Cemetery guardian phase, safety window, and completion flow', asy
   await expect(root).toHaveAttribute('data-heal-pickup-count', '0');
   await page.evaluate(async () => window.__SOULRUN_TEST__?.chooseUpgrade(0));
   expect(await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot())).toMatchObject({
-    state: 'loading-stage',
+    state: 'playing',
     stageId: 'dungeon',
     activeUpgradeOffer: null,
   });
@@ -141,7 +141,7 @@ test('collects queued cleanup XP before summary and reaches next-stage handoff',
   ).toBeGreaterThan(50);
   await page.evaluate(async () => window.__SOULRUN_TEST__?.chooseUpgrade(0));
   expect(await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot())).toMatchObject({
-    state: 'loading-stage',
+    state: 'playing',
     stageId: 'dungeon',
   });
 });

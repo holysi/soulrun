@@ -190,8 +190,9 @@ test('defeats the Flame Demon and hands Inferno back to Cemetery', async ({ page
   await expect(root).toHaveAttribute('data-temporary-hazard-count', '0');
   await page.evaluate(async () => window.__SOULRUN_TEST__?.chooseUpgrade(0));
   expect(await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot())).toMatchObject({
-    state: 'loading-stage',
+    state: 'playing',
     stageId: 'cemetery',
+    completedLoops: 1,
     activeUpgradeOffer: null,
   });
 });

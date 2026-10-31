@@ -122,7 +122,7 @@ test('runs the Skeleton Warden phases and hands off to Inferno', async ({ page }
   });
   await page.evaluate(async () => window.__SOULRUN_TEST__?.chooseUpgrade(0));
   expect(await page.evaluate(() => window.__SOULRUN_TEST__?.snapshot())).toMatchObject({
-    state: 'loading-stage',
+    state: 'playing',
     stageId: 'inferno',
   });
 });

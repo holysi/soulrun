@@ -27,6 +27,7 @@ export interface GameEventMap {
     readonly stageIndex: number;
     readonly completedLoops: number;
   };
+  'loop:completed': { readonly completedLoops: number };
   'stage:timer-changed': { readonly remainingMs: number };
   'stage:pressure-changed': { readonly step: number };
   'boss:spawned': { readonly bossId: string; readonly safeUntilMs: number };
