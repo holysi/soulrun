@@ -1,6 +1,7 @@
 import type Phaser from 'phaser';
 
 import type { AimDirection } from '../testing/types';
+import type { SoulrunRecords, SoulrunSettings } from '../storage';
 
 interface PointValue {
   readonly x: number;
@@ -102,6 +103,8 @@ export interface GameEventMap {
     readonly scoreEarned: number;
   };
   'game:pause-changed': { readonly paused: boolean; readonly reason: 'user' | 'blur' };
+  'settings:changed': { readonly settings: SoulrunSettings };
+  'records:changed': { readonly records: SoulrunRecords };
 }
 
 export interface EventEnvelope<K extends keyof GameEventMap> {

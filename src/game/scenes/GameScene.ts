@@ -30,6 +30,8 @@ import { createGameplayStreams } from '../random/RandomSource';
 import type { RandomSource } from '../random/RandomSource';
 import { StageDirector, moveCircleAgainstRectangles } from '../stages';
 import type { StageDirectorEvent, StageEnemyState } from '../stages';
+import { getSoulrunStorage } from '../storage';
+import type { SoulrunSettings } from '../storage';
 import type {
   AimDirection,
   TestInputCommand,
@@ -169,6 +171,8 @@ export class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private movementKeys!: Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
   private escapeKey!: Phaser.Input.Keyboard.Key;
+  private muteKey!: Phaser.Input.Keyboard.Key;
+  private fullscreenKey!: Phaser.Input.Keyboard.Key;
   private model = new PlayerModel(PLAYER_CONFIG);
   private bossSafety = new BossSafetyWindow();
   private aimDirection: AimDirection = 'e';
@@ -178,6 +182,7 @@ export class GameScene extends Phaser.Scene {
   private completedLoops = 0;
   private continuingAdventure = false;
   private stageScoreStart = 0;
+  private settings!: SoulrunSettings;
   private nextAttackAtMs = 0;
   private paused = false;
   private attackId = 0;
@@ -331,6 +336,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.settings = getSoulrunStorage().snapshot().settings;
+    this.applySettings();
     if (!this.continuingAdventure) this.model = new PlayerModel(PLAYER_CONFIG);
     this.bossSafety = new BossSafetyWindow();
     this.aimDirection = 'e';
@@ -473,6 +480,7 @@ export class GameScene extends Phaser.Scene {
       stageIndex: this.stageConfig.order,
       completedLoops: this.completedLoops,
     });
+    this.eventsOut.emit('settings:changed', { settings: this.settings });
     this.reflectState();
 
     this.game.events.on(Phaser.Core.Events.BLUR, this.pauseForBlur, this);
@@ -720,6 +728,10 @@ export class GameScene extends Phaser.Scene {
     if (!result.applied) return false;
     this.damageTaken += result.amount;
     const progression = this.progression.snapshot();
+    if (result.died) {
+      const mount = this.game.canvas.parentElement;
+      if (mount) mount.dataset.resultSeed = this.seed;
+    }
     publishPlayerDamage(this.eventsOut, result, this.model.health, this.model.maxHealth, sourceId, {
       score: this.score.score,
       level: progression.level,
@@ -727,9 +739,18 @@ export class GameScene extends Phaser.Scene {
       survivalTimeMs: this.simulationTimeMs,
       killsByEnemyId: Object.fromEntries(this.killsByEnemyId),
     });
-    this.player.setTintFill(0xff9a8f);
-    this.time.delayedCall(90, () => this.player.clearTint());
+    if (!this.settings.reducedFlashes) {
+      this.player.setTintFill(0xff9a8f);
+      this.time.delayedCall(90, () => this.player.clearTint());
+    }
+    if (this.settings.screenShake) this.cameras.main.shake(80, 0.003);
     if (result.died) {
+      const records = getSoulrunStorage().recordAdventure({
+        score: this.score.score,
+        completedLoops: this.completedLoops,
+        survivalTimeMs: this.simulationTimeMs,
+      });
+      this.eventsOut.emit('records:changed', { records });
       this.player.setVelocity(0, 0).play(`player-death-${this.aimDirection}`);
       this.physics.world.pause();
       this.reflectState();
@@ -766,11 +787,23 @@ export class GameScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as Record<'up' | 'down' | 'left' | 'right', Phaser.Input.Keyboard.Key>;
     this.escapeKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.muteKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this.fullscreenKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.upgradeKeys = [
       keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
       keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
       keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
     ];
+    this.muteKey.on('down', this.toggleMute, this);
+    this.fullscreenKey.on('down', this.toggleFullscreen, this);
+    keyboard.on('keydown-ENTER', this.returnToTitleAfterDeath, this);
+    keyboard.on('keydown-SPACE', this.returnToTitleAfterDeath, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.muteKey.off('down', this.toggleMute, this);
+      this.fullscreenKey.off('down', this.toggleFullscreen, this);
+      keyboard.off('keydown-ENTER', this.returnToTitleAfterDeath, this);
+      keyboard.off('keydown-SPACE', this.returnToTitleAfterDeath, this);
+    });
   }
 
   private createPlayer(): void {
@@ -1143,9 +1176,44 @@ export class GameScene extends Phaser.Scene {
   }
 
   private selectUpgradeWithPointer(pointer: Phaser.Input.Pointer): void {
+    if (this.model.dead) {
+      this.returnToTitleAfterDeath();
+      return;
+    }
     if (!this.progression.activeOffer) return;
     const index = upgradeOptionAt(pointer.x, pointer.y);
     if (index !== null) this.selectUpgrade(index);
+  }
+
+  private toggleMute(): void {
+    this.settings = getSoulrunStorage().updateSettings({ muted: !this.settings.muted });
+    this.applySettings();
+    this.eventsOut.emit('settings:changed', { settings: this.settings });
+  }
+
+  private toggleFullscreen(): void {
+    if (this.scale.isFullscreen) this.scale.stopFullscreen();
+    else this.scale.startFullscreen();
+  }
+
+  private applySettings(): void {
+    this.sound.mute = this.settings.muted;
+    this.sound.volume = this.settings.soundVolume;
+    this.registry.set('soulrun:music-volume', this.settings.musicVolume);
+    this.registry.set('soulrun:sound-volume', this.settings.soundVolume);
+    const mount = this.game.canvas.parentElement;
+    if (!mount) return;
+    mount.dataset.muted = String(this.settings.muted);
+    mount.dataset.musicVolume = String(this.settings.musicVolume);
+    mount.dataset.soundVolume = String(this.settings.soundVolume);
+    mount.dataset.screenShake = String(this.settings.screenShake);
+    mount.dataset.reducedFlashes = String(this.settings.reducedFlashes);
+  }
+
+  private returnToTitleAfterDeath(): void {
+    if (!this.model.dead) return;
+    this.scene.stop(SCENE_KEYS.overlay);
+    this.scene.start(SCENE_KEYS.title);
   }
 
   private runSimulation(delta: number, manuallyIntegrateMovement: boolean): void {
@@ -1737,9 +1805,17 @@ export class GameScene extends Phaser.Scene {
     if (!this.guardian || !boss || boss.health <= 0 || !this.guardianTimeline) return;
     const timeline = this.guardianTimeline;
     const state = timeline.stateAt(this.simulationTimeMs);
-    if (state === 'telegraph')
-      this.telegraph?.setAlpha(0.45 + Math.sin(this.simulationTimeMs / 70) * 0.2);
-    else this.telegraph?.setAlpha(state === 'active' ? 0.95 : 0.2);
+    const telegraphAlpha =
+      state === 'telegraph'
+        ? this.settings.reducedFlashes
+          ? 0.65
+          : 0.45 + Math.sin(this.simulationTimeMs / 70) * 0.2
+        : state === 'active'
+          ? 0.95
+          : 0.2;
+    this.telegraph?.setAlpha(telegraphAlpha);
+    const mount = this.game.canvas.parentElement;
+    if (mount) mount.dataset.telegraphAlpha = telegraphAlpha.toFixed(2);
     if (
       timeline.attack.kind === 'block' &&
       state === 'active' &&
