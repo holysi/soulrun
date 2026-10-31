@@ -273,7 +273,7 @@ export class GameScene extends Phaser.Scene {
     completedLoops?: number;
     continuingAdventure?: boolean;
   }): void {
-    this.seed = data?.seed ?? '';
+    this.seed = data?.seed || createAdventureSeed();
     this.stageId = data?.stageId ?? 'cemetery';
     this.testControlled = data?.testControlled ?? false;
     this.completedLoops = data?.completedLoops ?? 0;
@@ -2355,4 +2355,10 @@ export class GameScene extends Phaser.Scene {
       repeat,
     });
   }
+}
+
+function createAdventureSeed(): string {
+  const entropy = new Uint32Array(2);
+  globalThis.crypto.getRandomValues(entropy);
+  return `adventure-${entropy[0]!.toString(16).padStart(8, '0')}${entropy[1]!.toString(16).padStart(8, '0')}`;
 }

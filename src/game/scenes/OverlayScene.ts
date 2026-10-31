@@ -154,17 +154,17 @@ export class OverlayScene extends Phaser.Scene {
 
   private createSummaryPanel(): void {
     this.summaryPanel = this.add
-      .rectangle(GAME_WIDTH / 2, 77, 260, 72, 0x101426, 0.97)
+      .rectangle(GAME_WIDTH / 2, 51, 260, 40, 0x101426, 0.97)
       .setStrokeStyle(1, 0x8ef6e4)
       .setDepth(14)
       .setVisible(false);
     this.summaryText = this.add
-      .text(GAME_WIDTH / 2, 77, '', {
+      .text(GAME_WIDTH / 2, 51, '', {
         align: 'center',
         color: '#d9d4e7',
         fontFamily: 'monospace',
         fontSize: '9px',
-        lineSpacing: 2,
+        lineSpacing: 0,
       })
       .setOrigin(0.5)
       .setDepth(15)

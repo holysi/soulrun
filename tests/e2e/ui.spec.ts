@@ -235,3 +235,14 @@ test('reduced flashes keep Boss telegraphs at a stable alpha', async ({ page }) 
   await page.evaluate(() => window.__SOULRUN_TEST__?.advance(50));
   await expect(root).toHaveAttribute('data-telegraph-alpha', '0.65');
 });
+
+test('generates and displays an effective seed for a title-started adventure', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.waitForFunction(() => Boolean(window.__SOULRUN_TEST__));
+  await page.keyboard.press('Enter');
+  await expect(page.locator(ROOT)).toHaveAttribute('data-game-state', 'playing');
+  await page.evaluate(() => window.__SOULRUN_TEST__?.damagePlayer(1_000_000));
+  await expect(page.locator(ROOT)).toHaveAttribute('data-ui-panel', 'game-over');
+  const seed = await page.locator(ROOT).getAttribute('data-result-seed');
+  expect(seed).toMatch(/^adventure-[0-9a-f]{16}$/);
+});
