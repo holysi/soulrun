@@ -3,6 +3,7 @@ import type Phaser from 'phaser';
 import { SCENE_KEYS } from '../constants';
 import { GAME_CONFIG } from '../content';
 import { GameScene } from '../scenes/GameScene';
+import { resetSoulrunStorage } from '../storage';
 import type { SoulrunTestApi, TestInputCommand, TestSnapshot } from './types';
 
 const STORAGE_PREFIX = 'soulrun:';
@@ -125,7 +126,6 @@ export class LiveGameTestAdapter implements SoulrunTestApi {
     const mount = this.game.canvas.parentElement;
     if (mount) {
       mount.dataset.testState = 'idle';
-      delete mount.dataset.gameState;
       delete mount.dataset.playerX;
       delete mount.dataset.playerY;
       delete mount.dataset.aimDirection;
@@ -191,5 +191,6 @@ export class LiveGameTestAdapter implements SoulrunTestApi {
     } catch {
       // Storage cleanup is best-effort; denied storage must not break test isolation.
     }
+    resetSoulrunStorage();
   }
 }
